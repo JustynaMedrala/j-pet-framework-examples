@@ -24,10 +24,10 @@ int main(int argc, const char* argv[])
     JPetManager& manager = JPetManager::getManager();
     
     manager.registerTask<EventFinder>("EventFinder");
-    manager.registerTask<EventAnalyzer>("EventAnalyzer");
+    //manager.registerTask<EventAnalyzer>("EventAnalyzer");
     
     manager.useTask("EventFinder", "hits", "unk.evt");
-    manager.useTask("EventAnalyzer", "unk.evt", "ana.evt");
+    //manager.useTask("EventAnalyzer", "unk.evt", "ana.evt");
     
     manager.run(argc, argv);
   } catch (const std::exception& except) {

@@ -19,7 +19,6 @@
 #include "../LargeBarrelAnalysis/SignalTransformer.h"
 #include "../LargeBarrelAnalysis/HitFinder.h"
 #include "../LargeBarrelAnalysis/EventFinder.h"
-#include "../LargeBarrelAnalysis/EventCategorizer.h"
 #include "TOTPlotter.h"
 #include "OPSCandidateFinder.h"
 #include "OPSReconstructor.h"
@@ -39,7 +38,6 @@ int main(int argc, const char* argv[])
   manager.registerTask<HitFinder>("HitFinder");
   manager.registerTask<TOTPlotter>("TOTPlotter");
   manager.registerTask<EventFinder>("EventFinder");
-  manager.registerTask<EventCategorizer>("EventCategorizer");
   manager.registerTask<OPSCandidateFinder>("OPSCandidateFinder");
 
   manager.registerTask<OPSReconstructor>("OPSReconstructor");
@@ -57,14 +55,13 @@ int main(int argc, const char* argv[])
   
   // manager.useTask("TOTPlotter", "hits", "hits.plot");
   // manager.useTask("EventFinder", "hits.plot", "pre.evt");
-  manager.useTask("EventCategorizer", "unk.evt", "cat.evt");
-  manager.useTask("OPSCandidateFinder", "cat.evt", "ops.cand.evt");
+  // manager.useTask("OPSCandidateFinder", "pre.evt", "ops.cand.evt");
 
   // manager.useTask("OPSReconstructor", "ops.cand.evt", "ops.rec.evt");
   // manager.useTask("OPSAnalyzer", "ops.rec.evt", "ops.ana.evt");
   // manager.useTask("OPSCleaner", "ops.ana.evt", "ops.cln.evt");
 
-  //  manager.useTask("Ntupler", "pre.evt", "void");
+  manager.useTask("Ntupler", "pre.evt", "void");
   
   manager.run(argc, argv);
 }

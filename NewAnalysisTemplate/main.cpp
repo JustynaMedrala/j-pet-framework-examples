@@ -22,6 +22,9 @@
 #include <JPetManager/JPetManager.h>
 using namespace std;
 
+int scatter_num = 0;
+int all_num = 0;
+
 int main(int argc, const char* argv[]) {
   try {
     JPetManager& manager = JPetManager::getManager();
