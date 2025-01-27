@@ -60,15 +60,24 @@ public:
                                      double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
 
   template <typename HitType>
-  static bool processHistograms_2g(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, 
+  static bool processHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, 
                                    JPetStatistics& stats, bool saveHistos, double maxThetaDiff, double maxTimeDiff, double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
                                    double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
 
   template <typename HitType>
+  static bool processHistograms(const std::vector<std::vector<const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
+                          JPetStatistics& stats, bool saveHistos, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff,  double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
+                          double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
+
+  template <typename HitType>
   static void fillAnnihilationHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations,
-                                                       const std::vector<const HitType*>& prompts, JPetStatistics& stats, 
-                                                       const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax);
- 
+                                          const std::vector<const HitType*>& prompts, JPetStatistics& stats, 
+                                          const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax);
+
+  template <typename HitType>
+  static void fillAnnihilationHistograms(const std::vector<std::vector<const HitType*>>& annihilations,
+                                          const std::vector<const HitType*>& prompts, std::vector<std::pair<double, int>>& DOP_values, JPetStatistics& stats, 
+                                          const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax);
 
   static bool checkFor3GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff, double maxDOP, JPetStatistics& stats, 
                             bool saveHistos, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin, double totCutDeexMax, const TVector3& sourcePos, 
@@ -82,6 +91,9 @@ public:
                                std::vector<std::pair<const JPetPhysRecoHit*, const JPetPhysRecoHit*>>& annihilations,
                                std::vector<std::pair<const JPetMCRecoHit*, const JPetMCRecoHit*>>& annihilationsMC);
 
+  static void identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, 
+                               std::vector<std::vector<const JPetPhysRecoHit*>>& annihilations,
+                               std::vector<std::vector<const JPetMCRecoHit*>>& annihilationsMC);
 
   static bool checkToT(const JPetPhysRecoHit* hit, double minToT, double maxToT);
 
@@ -124,7 +136,7 @@ public:
 
   static double calculatePlaneCenterDistance(const JPetBaseHit& firstHit, const JPetBaseHit& secondHit, const JPetBaseHit& thirdHit);
 
-  static double calculatePlanePointDistance(const JPetPhysRecoHit* firstHit, const JPetPhysRecoHit* secondHit, const JPetPhysRecoHit* thirdHit, const TVector3& decayPoint);
+  static double calculatePlanePointDistance(const JPetBaseHit* firstHit, const JPetBaseHit* secondHit, const JPetBaseHit* thirdHit, const TVector3& decayPoint);
 
   static TVector3 calculateAnnihilationPoint(const JPetBaseHit& hit1, const JPetBaseHit& hit2, const JPetBaseHit& hit3);
 
