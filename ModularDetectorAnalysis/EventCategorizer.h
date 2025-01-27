@@ -45,14 +45,17 @@ public:
 
 protected:
   const std::string kEventTimeParamKey = "EventFinder_EventTime_double";
+  const std::string kEventTimeZoomParamKey = "EventFinder_EventTime_zoom_double";
 
   const std::string k2gThetaDiffParamKey = "EventCategorizer_2gThetaDiff_double";
   const std::string k2gTimeDiffParamKey = "EventCategorizer_2gTimeDiff_double";
 
   const std::string k3gMinRelAngleParamKey = "EventCategorizer_3gMinRelativeAngle_double";
 
-  const std::string kToTCutAnniMinParamKey = "EventCategorizer_ToT_Cut_Anni_Min_double";
-  const std::string kToTCutAnniMaxParamKey = "EventCategorizer_ToT_Cut_Anni_Max_double";
+  const std::string kToTCut2AnniMinParamKey = "EventCategorizer_ToT_Cut_2Anni_Min_double";
+  const std::string kToTCut2AnniMaxParamKey = "EventCategorizer_ToT_Cut_2Anni_Max_double";
+  const std::string kToTCut3AnniMinParamKey = "EventCategorizer_ToT_Cut_3Anni_Min_double";
+  const std::string kToTCut3AnniMaxParamKey = "EventCategorizer_ToT_Cut_3Anni_Max_double";
   const std::string kToTCutDeexMinParamKey = "EventCategorizer_ToT_Cut_Deex_Min_double";
   const std::string kToTCutDeexMaxParamKey = "EventCategorizer_ToT_Cut_Deex_Max_double";
 
@@ -80,31 +83,49 @@ protected:
   const std::string kScatterAngleMaxParamKey = "Scatter_Angle_Max_double";
 
   const std::string kMaxTimeDiffParamKey = "EventCategorizer_MaxTimeDiff_double";
+  const std::string k3DOPParamKey = "EventCategorizer_3DOP_double";
   const std::string kDetectorYRotation = "CalibrationTools_Detector_Y_Rotation_Degrees_double";
   const std::string kCosmicMaxThetaDeg = "CalibrationTools_Cosmic_MatTheta_Degrees_double";
 
   const std::string kSaveControlHistosParamKey = "Save_Control_Histograms_bool";
   const std::string kSaveCalibHistosParamKey = "Save_Calib_Histograms_bool";
   const std::string kTrentoCalibrationParamKey = "Trento_Calibration_bool";
+  const std::string kDataTypeParamKey = "Data_Type_bool";
 
   void saveEvents(const std::vector<JPetEvent>& event);
 
   boost::property_tree::ptree fConstansTree;
   double fEventTimeWindow = 5000.0;
+  double fEventTimeWindow_zoom = 1000.0;
   double fScatterTOFTimeDiff = 2000.0;
   double fScatterTimeMin = -5000.0;
   double fScatterTimeMax = 0.0;
   double fScatterAngleMin = 160.0;
   double fScatterAngleMax = 180.0;
+  double f3gScatterTimeMin = -5000.0;
+  double f3gScatterTimeMax = 0.0;
+  double f3gScatterAngleMin = 120.0;
+  double f3gScatterAngleMax = 180.0;
   double fMaxTimeDiff = 15000.0;
-  double f2gThetaDiff = 3.0;
+  double f2gDOP = 8;
+  double f3gDOP = 5;
+  double f2gThetaDiff = 5.0;
   double f2gTimeDiff = 2000.0;
-  double f3gMinRelAngle = 185.0;
-  double fToTCutAnniMin = 150000.0;
-  double fToTCutAnniMax = 250000.0;
-  double fToTCutDeexMin = 270000.0;
-  double fToTCutDeexMax = 370000.0;
-  double fToTHistoUpperLimit = 200000.0;
+  double f3gTimeDiff = 1500.0;
+  double f3gMinRelAngle = 190.0;
+  double f3gMinRelPhi = 15.0;
+  double f3gMinDist = 0.0;
+  double fToTCut2AnniMin = 5000000.0;
+  double fToTCut2AnniMax = 7700000.0;
+  double fToTCut1AnniMin = 5000000.0;
+  double fToTCut1AnniMax = 7500000.0;
+  double fToTCut1AnniMin_larger = 3500000.0;
+  double fToTCut1AnniMax_larger = 7500000.0;
+  double fToTCut3AnniMin = 2000000.0;
+  double fToTCut3AnniMax = 8000000.0;
+  double fToTCutDeexMin = 8500000.0;
+  double fToTCutDeexMax = 12000000.0;
+  double fToTHistoUpperLimit = 20000000.0;
   double fLORAngleCut = 5.0;
   double fLORPosZCut = 5.0;
   double fSourceDistXYCut = 5.0;
@@ -117,8 +138,9 @@ protected:
   bool fSaveControlHistos = true;
   bool fSaveCalibHistos = false;
   bool fTrentoCalibHistos = false;
+  bool fDataType = false; //false - data, true - mc
 
-  void initialiseHistograms();
+  void initialiseHistograms(bool dataType);
   void initialiseCalibrationHistograms(bool includeTrento);
 };
 #endif /* !EVENTCATEGORIZER_H */

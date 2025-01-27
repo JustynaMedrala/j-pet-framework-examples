@@ -28,7 +28,7 @@ using namespace jpet_options_tools;
 
 EventFinder::EventFinder(const char* name) : JPetUserTask(name) {}
 
-EventFinder::~EventFinder() {}
+EventFinder::~EventFinder() { }
 
 bool EventFinder::init()
 {
