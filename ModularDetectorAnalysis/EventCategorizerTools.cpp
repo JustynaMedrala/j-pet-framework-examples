@@ -478,11 +478,6 @@ bool EventCategorizerTools::checkFor3GammaLifetime(const JPetEvent& event, vecto
 
   vector<pair<double, int>> DOP_values = {};
 
-  if (annihilations.size() == 0)
-  {
-    return false;
-  }
-
   bool isLifetimeEvent = false;
   
   if(!annihilations.empty()) isLifetimeEvent = processHistograms(annihilations, DOP_values, stats, saveHistos, minRelAngleCut, minRelPhiCut, minDistCut, maxTimeDiff, maxDOP, 
