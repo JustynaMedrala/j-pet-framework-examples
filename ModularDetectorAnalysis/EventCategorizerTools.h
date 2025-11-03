@@ -19,6 +19,8 @@
 #include <Hits/JPetPhysRecoHit/JPetPhysRecoHit.h>
 #include <Hits/JPetMCRecoHit/JPetMCRecoHit.h>
 #include <JPetEvent/JPetEvent.h>
+#include <JPetTimeWindowMC/JPetTimeWindowMC.h>
+#include <JPetRawMCHit/JPetRawMCHit.h>
 #include <JPetStatistics/JPetStatistics.h>
 #include <TVector3.h>
 #include <boost/property_tree/ptree.hpp>
@@ -42,8 +44,24 @@ public:
     kMinMaxParams
   };
 
-  // Categorizing methods
-  static bool checkFor1Gamma(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, double totCutAnniMin_larger, 
+  //MC clasification
+  static void selectAndCategorizeFourHits(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC,
+    JPetStatistics& stats, double maxZ, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin,
+    double totCutDeexMax);
+  static void fillBackground(JPetStatistics& stats, const std::vector<const JPetMCRecoHit*>& selectedOpsHits, const std::vector<const JPetMCRecoHit*>& selectedPromptHits,
+      const JPetTimeWindowMC* timeWindowMC);
+  static void processMCEvent(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC, const TVector3& sourcePos, JPetStatistics& stats);
+  static void processHits(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC, JPetStatistics& stats, 
+                          std::vector<const JPetMCRecoHit*>& oPsHits, std::vector<const JPetMCRecoHit*>& promptHits, 
+                          std::vector<JPetRawMCHit>& oPsRawHits, std::vector<JPetRawMCHit>& promptRawHits, std::vector<int>& fVtxValues); 
+  static void categorizeHit(const JPetRawMCHit& mcHit, bool& fIsSecondary, bool& fIsScattered, bool& fContainsPrompt, 
+                          bool& fIsPickOff, bool& fIsOPs);
+  static void checkTripleVertex(const std::vector<int>& fVtxValues, std::vector<int>& fTrueVtxValues);
+  static bool checkVertex(const JPetRawMCHit& rawHit, const std::vector<int> fTrueVtxValues);
+  static void fillHistograms(JPetStatistics& stats, const std::vector<const JPetMCRecoHit*>& oPsHits, const std::vector<JPetRawMCHit>& oPsRawHits, 
+    const std::vector<const JPetMCRecoHit*>& promptHits,  const std::vector<JPetRawMCHit>& promptRawHits, std::vector<int>& fTrueVtxValues, const TVector3& sourcePos); 
+// Categorizing methods
+  static bool checkFor1Gamma(const JPetEvent& event, const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax, double totCutAnniMin_larger, 
                                           double totCutAnniMax_larger, double totCutDeexMin, double totCutDeexMax, JPetStatistics& stats, bool saveHistos);
   static bool checkFor2Gamma(const JPetEvent& event, JPetStatistics& stats, bool saveHistos, double maxThetaDiff, double maxTimeDiff,
                              double totCutAnniMin, double totCutAnniMax, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue,
@@ -54,38 +72,38 @@ public:
 
   static bool checkFor3Gamma(const JPetEvent& event, double minRelAngleCut, double maxTimeDiff, double totCutAnniMin, double totCutAnniMax, JPetStatistics& stats, bool saveHistos);
 
-  static bool checkFor2GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, JPetStatistics& stats, bool saveHistos, double maxThetaDiff, double maxTimeDiff,
+  static bool checkFor2GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, JPetStatistics& stats, bool saveHistos, double maxZ, double maxThetaDiff, double maxTimeDiff,
                                      double maxDOP, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin, double totCutDeexMax,
                                      const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, double scatterTimeMin,
                                      double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
 
   template <typename HitType>
-  static bool processHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, 
-                                   JPetStatistics& stats, bool saveHistos, double maxThetaDiff, double maxTimeDiff, double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
+  static bool processHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
+                                   JPetStatistics& stats, bool saveHistos, double maxZ, double maxThetaDiff, double maxTimeDiff, double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
                                    double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
 
   template <typename HitType>
-  static bool processHistograms(const std::vector<std::vector<const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
-                          JPetStatistics& stats, bool saveHistos, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff,  double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
+  static bool processHistograms(const JPetTimeWindowMC* timeWindowMC, const std::vector<std::vector<const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
+                          JPetStatistics& stats, bool saveHistos, double maxZ, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff,  double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
                           double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax);
 
   template <typename HitType>
   static void fillAnnihilationHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations,
-                                          const std::vector<const HitType*>& prompts, JPetStatistics& stats, 
+                                          const std::vector<const HitType*>& prompts, std::vector<std::pair<double, int>>& DOP_values,JPetStatistics& stats, 
                                           const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax);
 
   template <typename HitType>
-  static void fillAnnihilationHistograms(const std::vector<std::vector<const HitType*>>& annihilations,
+  static void fillAnnihilationHistograms(const JPetTimeWindowMC* timeWindowMC, const std::vector<std::vector<const HitType*>>& annihilations,
                                           const std::vector<const HitType*>& prompts, std::vector<std::pair<double, int>>& DOP_values, JPetStatistics& stats, 
                                           const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax);
 
-  static bool checkFor3GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff, double maxDOP, JPetStatistics& stats, 
+  static bool checkFor3GammaLifetime(const JPetTimeWindowMC* timeWindowMC, const JPetEvent& event, std::vector<int> bad_ID, double maxZ, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff, double maxDOP, JPetStatistics& stats, 
                             bool saveHistos, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin, double totCutDeexMax, const TVector3& sourcePos, 
                             ScatterTestType testType, double scatterTestValue, double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, 
                             double scatterAngleMax);
 
   // Single observable tests
-  static void fillHitHistograms(const JPetEvent& event, JPetStatistics& stats, bool saveHistos, const std::string& histogramName);
+  static void fillHitHistograms(const JPetEvent& event, JPetStatistics& stats, bool saveHistos, const std::string& histogramName, const std::string& histogramName_z, const std::string& histogramName_z_ID);
   
   static void identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, 
                                std::vector<std::pair<const JPetPhysRecoHit*, const JPetPhysRecoHit*>>& annihilations,
@@ -94,6 +112,9 @@ public:
   static void identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, 
                                std::vector<std::vector<const JPetPhysRecoHit*>>& annihilations,
                                std::vector<std::vector<const JPetMCRecoHit*>>& annihilationsMC);
+
+  static double EnergyToToT(double hit_energy);
+  static double ToTToEnergy(double hit_tot);
 
   static bool checkToT(const JPetPhysRecoHit* hit, double minToT, double maxToT);
 
@@ -123,7 +144,7 @@ public:
 
   static double calculateTOF(double time1, double time2);
 
-  static double calculateTOF(const JPetBaseHit* hit);
+  static double calculateTOF(const JPetBaseHit* hit, const TVector3& sourcePos);
 
   /// Tof calculated with the ordered hits with respect to scintillator number.
   /// The first one will be hit with smaller theta angle.

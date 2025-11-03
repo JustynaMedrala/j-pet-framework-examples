@@ -29,7 +29,6 @@ int main(int argc, const char* argv[])
   {
     JPetManager& manager = JPetManager::getManager();
 
-    
     // manager.registerTask<TimeWindowCreator>("TimeWindowCreator");
     // manager.registerTask<SignalFinder>("SignalFinder");
     // manager.registerTask<SignalTransformer>("SignalTransformer");
@@ -37,7 +36,6 @@ int main(int argc, const char* argv[])
     // manager.registerTask<EventFinder>("EventFinder");
     manager.registerTask<EventCategorizer>("EventCategorizer");
 
-    
     // manager.useTask("TimeWindowCreator", "hld", "tslot");
     // manager.useTask("SignalFinder", "tslot", "pm.sig");
     // manager.useTask("SignalTransformer", "pm.sig", "mtx.sig");

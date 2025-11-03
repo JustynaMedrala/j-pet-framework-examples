@@ -7,5 +7,5 @@
   "SignalFinder_EdgeMaxTime_float":10000.0,
   "SignalFinder_LeadTrailMaxTime_float":200000.0,
   "SignalTransformer_MergeSignalsTime_float":10000.0,
-	"HitFinder_ABTimeDiff_float":20000.0
+  "HitFinder_ABTimeDiff_float":20000.0
 }

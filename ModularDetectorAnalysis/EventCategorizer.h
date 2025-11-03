@@ -106,12 +106,13 @@ protected:
   double f3gScatterTimeMax = 0.0;
   double f3gScatterAngleMin = 120.0;
   double f3gScatterAngleMax = 180.0;
+  double fzMax = 22;
   double fMaxTimeDiff = 15000.0;
   double f2gDOP = 8;
   double f3gDOP = 5;
   double f2gThetaDiff = 5.0;
   double f2gTimeDiff = 2000.0;
-  double f3gTimeDiff = 1500.0;
+  double f3gTimeDiff = 3000.0;
   double f3gMinRelAngle = 190.0;
   double f3gMinRelPhi = 15.0;
   double f3gMinDist = 0.0;

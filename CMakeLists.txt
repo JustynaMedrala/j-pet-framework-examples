@@ -172,11 +172,20 @@ if(DOWNLOAD_DATA)
   file(REMOVE ${DOWNLOAD_BASE_PATH}/examples_reformed.sha)
 endif()
 
+
+set(BUILD_EXAMPLE_SET "ML" CACHE STRING "Example set to build: ML or Classic")
+set_property(CACHE BUILD_EXAMPLE_SET PROPERTY STRINGS ML Classic)
+
+
 ################################################################################
 ## Directories with examples
 add_subdirectory(ModularDetectorAnalysis)
-#add_subdirectory(ListmodeExport)
 add_subdirectory(MCGeantAnalysis)
+#add_subdirectory(ModularDetectorAnalysis)
+#add_subdirectory(ListmodeExport)
+#add_subdirectory(MCGeantAnalysis)
+#add_subdirectory(ML_ModularDetectorAnalysis)
+#add_subdirectory(ML_MCGeantAnalysis)
 #add_subdirectory(RedModuleAnalysis)
 #add_subdirectory(opsAnalysis)
 #add_subdirectory(Imaging)
