@@ -15,7 +15,6 @@
 
 #include "../ModularDetectorAnalysis/EventFinder.h"
 #include "../ModularDetectorAnalysis/EventCategorizer.h"
-#include "../ModularDetectorAnalysis/EventCategorizerTools.h"
 #include "EventAnalyzer.h"
 #include <JPetManager/JPetManager.h>
 
@@ -28,14 +27,17 @@ int main(int argc, const char* argv[])
     JPetManager& manager = JPetManager::getManager();
 
     manager.registerTask<EventFinder>("EventFinder");
-    manager.registerTask<EventAnalyzer>("EventAnalyzer");
+    //manager.registerTask<EventAnalyzer>("EventAnalyzer");
     manager.registerTask<EventCategorizer>("EventCategorizer");
 
     manager.useTask("EventFinder", "hits", "unk.evt");
-    manager.useTask("EventAnalyzer", "unk.evt", "ana.evt");
+    //manager.useTask("EventAnalyzer", "unk.evt", "ana.evt");
     manager.useTask("EventCategorizer", "unk.evt", "cat.evt");
 
+    
     manager.run(argc, argv);
+
+    //cout<<EventAnalyzer::n_acc<<", "<<double(EventAnalyzer::n_all)<<endl;
   }
   catch (const std::exception& except)
   {

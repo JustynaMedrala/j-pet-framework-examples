@@ -52,7 +52,7 @@ protected:
   const std::string kConstantsFileParamKey = "ConstantsFile_std::string";
   const std::string kABTimeDiffParamKey = "HitFinder_ABTimeDiff_double";
   boost::property_tree::ptree fConstansTree;
-  double fToTHistoUpperLimit = 2e7;
+  double fToTHistoUpperLimit = 200000.0;
   bool fSaveControlHistos = true;
   bool fSaveCalibHistos = false;
   double fABTimeDiff = 10000.0;

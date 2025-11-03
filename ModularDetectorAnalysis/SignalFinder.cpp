@@ -181,18 +181,8 @@ void SignalFinder::savePMSignals(const vector<JPetPMSignal>& pmSigVec)
     fOutputEvents->add<JPetPMSignal>(pmSig);
     if (fSaveControlHistos)
     {
-      double scinID = pmSig.getPM().getMatrix().getScin().getID();
-      auto side = pmSig.getPM().getMatrix().getSide();
       getStatistics().fillHistogram("pmsig_multi", pmSig.getLeadTrailPairs().size());
       getStatistics().fillHistogram("pmsig_sipm_id", pmSig.getPM().getID());
-      if(side == JPetMatrix::SideA){
-      if(scinID == 206) getStatistics().fillHistogram("pmsig_multi_sideA_206", pmSig.getPM().getID()%4);
-      if(scinID == 313) getStatistics().fillHistogram("pmsig_multi_sideA_313", pmSig.getPM().getID()%4);
-      if(scinID == 505) getStatistics().fillHistogram("pmsig_multi_sideA_505", pmSig.getPM().getID()%4);}
-      if(side == JPetMatrix::SideB){
-      if(scinID == 206) getStatistics().fillHistogram("pmsig_multi_sideB_206", pmSig.getPM().getID()%4);
-      if(scinID == 313) getStatistics().fillHistogram("pmsig_multi_sideB_313", pmSig.getPM().getID()%4);
-      if(scinID == 505) getStatistics().fillHistogram("pmsig_multi_sideB_505", pmSig.getPM().getID()%4);}
       if (pmSig.getToT() != 0.0)
       {
         getStatistics().fillHistogram("pmsig_tot_sipm_id", pmSig.getPM().getID(), pmSig.getToT());
@@ -227,24 +217,6 @@ void SignalFinder::initialiseHistograms()
 
   getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi", "PM Signal Multiplicity", 6, 0.5, 6.5), "Total number of ChSigs in PMSig",
                                           "Number of Signal Channels");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideA_206", "PM Signals", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideA_313", "PM Signal", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideA_505", "PM Signal", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideB_206", "PM Signal", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideB_313", "PM Signal", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
-
-  getStatistics().createHistogramWithAxes(new TH1D("pmsig_multi_sideB_505", "PM Signal", 4, -0.5, 3.5), "SiPM ID %4",
-                                          "Number of PM Signals");
 
   getStatistics().createHistogramWithAxes(new TH1D("pmsig_tslot", "Number of PM Signals in Time Window", 100, 0.5, 100.5),
                                           "Number of PM Signal in Time Window", "Number of Time Windows");

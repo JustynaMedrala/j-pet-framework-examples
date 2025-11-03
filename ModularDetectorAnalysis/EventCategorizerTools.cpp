@@ -20,109 +20,430 @@
 #include <TMath.h>
 #include <TRandom.h>
 #include <vector>
+#include <algorithm> 
+#include <random> 
 
 using namespace std;
 
-
-bool EventCategorizerTools::checkFor1Gamma(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, double totCutAnniMin_larger, 
-                                          double totCutAnniMax_larger, double totCutDeexMin, double totCutDeexMax, JPetStatistics& stats, bool saveHistos)
+void EventCategorizerTools::selectAndCategorizeFourHits(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC,
+  JPetStatistics& stats, double maxZ, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin,
+  double totCutDeexMax)
 {
-  if (event.getHits().size() != 2)
-  {
-    return false;
-  }
-  
-  vector<const JPetPhysRecoHit*> prompts;
-  vector<vector<const JPetPhysRecoHit*>> annihilations;
+  const auto& allHits = event.getHits();
 
-  // First check if any of the hits in the event is prompt based on TOT selection
-  for (uint i = 0; i < event.getHits().size(); i++)
-  {
-    bool totCut = false, totCut_larger = false;
-    auto promptHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
-    if (saveHistos)
-    {
-      double hitTot = promptHit->getToT();
-      stats.fillHistogram("1g_tot", hitTot);
-      if(checkToT(promptHit, totCutAnniMin, totCutAnniMax))
-      {
-        totCut = true;
-        
-        stats.fillHistogram("1g_tot_tot", hitTot);
-      }
-      if(checkToT(promptHit, totCutAnniMin_larger, totCutAnniMax_larger))
-      {
-        totCut_larger = true;
-        stats.fillHistogram("1g_tot_larger_tot", hitTot);
-      }
-    }
-    if (checkToT(promptHit, totCutDeexMin, totCutDeexMax))
-    {
-      prompts.push_back(promptHit);
-      if (saveHistos)
-      {
-        stats.fillHistogram("1g_prompt_tot", promptHit->getToT());
-      }
+  // Select hits inside maxZ
+  std::vector<const JPetMCRecoHit*> selectedHits;
+  for (const auto* hit : allHits) {
+    if (std::fabs(hit->getPosZ()) < maxZ) {
+      selectedHits.push_back(dynamic_cast<const JPetMCRecoHit*>(hit));
     }
   }
-  if (prompts.size() != 1)
-  {
-    return false;
-  }
 
-  for (uint i = 0; i < event.getHits().size(); i++)
-  {
-    auto hit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
-    if (!hit)
-    {
-      continue;
+  if (selectedHits.size() != 4) return; // Need exactly 4 hits
+
+  // Classify hits by ToT into ops and prompt, also get raw hits for tag and vertex info
+  std::vector<const JPetMCRecoHit*> selectedOpsHits;
+  std::vector<const JPetMCRecoHit*> selectedPromptHits;
+  std::vector<const JPetRawMCHit*> selectedOpsRawHits;
+  std::vector<const JPetRawMCHit*> selectedPromptRawHits;
+
+  for (const auto& hit : selectedHits) {
+    double tot = calculateToT(hit);
+    auto& rawHit = timeWindowMC->getMCHit<JPetRawMCHit>(hit->getMCindex());
+    if (tot >= totCutAnniMin && tot <= totCutAnniMax) {
+      selectedOpsHits.push_back(hit);
+      selectedOpsRawHits.push_back(&rawHit);
+    } else if (tot >= totCutDeexMin && tot <= totCutDeexMax) {
+      selectedPromptHits.push_back(hit);
+      selectedPromptRawHits.push_back(&rawHit);
     }
-
-    vector<const JPetPhysRecoHit*> annih_temp = {hit};
-    annihilations.push_back(annih_temp);
   }
 
-  if (annihilations.size() == 0)
-  {
-    return false;
-  }
+  if (selectedOpsHits.size() != 3 || selectedPromptHits.size() != 1) return;
 
-  double is1Gamma = false;
-
-  // Iterating over all combinations of found pairs and prompt photons
-  for (auto pair1g : annihilations)
-  {
-    for (auto prompt : prompts)
-    {
-      // Caculate event times - annihilation
-      double annihTime = pair1g[0]->getTime() - calculateTOF(pair1g[0]);
-      double promptTime = prompt->getTime() - calculateTOF(prompt);
-      double tot_annih = pair1g[0]->getToT();
-      double tot_prompt = prompt->getToT();
-  
-      // Calculate lifetime
-      double lifetime = annihTime - promptTime;
-
-      if (saveHistos)
-      {
-        stats.fillHistogram("lifetime_1g_prompt", lifetime);
-        stats.fillHistogram("lifetime_1g_prompt_zoom", lifetime);
-        if(checkToT(pair1g[0], totCutAnniMin, totCutAnniMax)){ 
-          is1Gamma = true;
-          stats.fillHistogram("lifetime_tot_1g_prompt", lifetime);
-          stats.fillHistogram("lifetime_tot_1g_prompt_zoom", lifetime);
-        }
-        if(checkToT(pair1g[0], totCutAnniMin_larger, totCutAnniMax_larger)) {
-          stats.fillHistogram("lifetime_tot_larger_1g_prompt", lifetime);
-          stats.fillHistogram("lifetime_tot_larger_1g_prompt_zoom", lifetime);
-        }
-      }
-        
+  // Check gamma tags:
+  bool validOpsTags = true;
+  for (const auto* rawHit : selectedOpsRawHits) {
+    //std::cout<<rawHit->getGammaTag()<<", ";
+    if (rawHit->getGammaTag() != 3) {
+      validOpsTags = false;
+      //break;
     }
   }
   
-  return is1Gamma;
+  bool validPromptTag = (selectedPromptRawHits[0]->getGammaTag() == 1);
+  //std::cout<<selectedPromptRawHits[0]->getGammaTag()<<std::endl;
+
+  if (!validOpsTags || !validPromptTag) {
+    // Background case
+    fillBackground(stats, selectedOpsHits, selectedPromptHits, timeWindowMC);
+    //return;
+  }
+
+  // Shuffle ops hits for randomness
+  std::random_device rd;
+  std::default_random_engine rng(rd());
+  std::shuffle(selectedOpsHits.begin(), selectedOpsHits.end(), rng);
+
+  const auto* firstHit  = selectedOpsHits[0];
+  const auto* secondHit = selectedOpsHits[1];
+  const auto* thirdHit  = selectedOpsHits[2];
+
+  // Check all ops and prompt hits have the same vertex (using raw hits)
+  int commonVertex = selectedOpsRawHits[0]->getMCVtxIndex();
+  bool sameVertex = true;
+  for (const auto* rawHit : selectedOpsRawHits) {
+    if (rawHit->getMCVtxIndex() != commonVertex) {
+      sameVertex = false;
+      break;
+    }
+  }
+  int promptVertex = selectedPromptRawHits[0]->getMCVtxIndex();
+
+  //std::cout<<"Same vertex: "<<selectedOpsRawHits[0]->getMCVtxIndex()<<", "<<selectedOpsRawHits[1]->getMCVtxIndex()<<", "<<selectedOpsRawHits[2]->getMCVtxIndex()<<", "<<promptVertex<<std::endl;
+
+  if (!sameVertex || promptVertex != commonVertex) {
+    // Background if vertices don't match
+    fillBackground(stats, selectedOpsHits, selectedPromptHits, timeWindowMC);
+    return;
+  }
+
+  // Calculate time differences between ops hits
+  double time_hit1 = firstHit->getTime();
+  double time_hit2 = secondHit->getTime();
+  double time_hit3 = thirdHit->getTime();
+  std::vector<double> time_Diffs = {time_hit1 - time_hit2, time_hit2 - time_hit3, time_hit3 - time_hit1};
+
+  // Calculate relative angles
+  std::vector<double> relativeAngles;
+  relativeAngles.push_back(TMath::RadToDeg() * firstHit->getPos().Angle(secondHit->getPos()));
+  relativeAngles.push_back(TMath::RadToDeg() * secondHit->getPos().Angle(thirdHit->getPos()));
+  relativeAngles.push_back(TMath::RadToDeg() * thirdHit->getPos().Angle(firstHit->getPos()));
+  std::sort(relativeAngles.begin(), relativeAngles.end());
+
+  double transformedX = relativeAngles[0] + relativeAngles[1];
+  double transformedY = relativeAngles[1] - relativeAngles[0];
+
+  // Fill signal histograms
+  for (const auto& hit : selectedOpsHits) {
+    stats.fillHistogram("ap_3g_tot_oPs", EnergyToToT(hit->getEnergy()));
+  }
+  for (double timeDiff : time_Diffs) {
+    stats.fillHistogram("ap_3g_timeDiff_oPs", timeDiff);
+  }
+  stats.fillHistogram("ap_3g_rel_angles_oPs", transformedX, transformedY);
+  stats.fillHistogram("ap_3g_tot_prompt", EnergyToToT(selectedPromptHits[0]->getEnergy()));
+  stats.fillHistogram("event_count", 1);
 }
+
+
+void EventCategorizerTools::fillBackground(JPetStatistics& stats, const std::vector<const JPetMCRecoHit*>& selectedOpsHits, const std::vector<const JPetMCRecoHit*>& selectedPromptHits,
+  const JPetTimeWindowMC* timeWindowMC)
+{
+  // Fill background histograms and count
+  stats.fillHistogram("event_count", 2);
+  for (const auto& hit : selectedOpsHits) {
+    stats.fillHistogram("ap_3g_tot_bkg_oPs", EnergyToToT(hit->getEnergy()));
+  }
+  for (const auto& hit : selectedPromptHits) {
+    stats.fillHistogram("ap_3g_tot_bkg_prompt", EnergyToToT(hit->getEnergy()));
+  }
+  // You can add timeDiffs and relative angles if you want, but they require hit times and positions
+}
+
+void EventCategorizerTools::processMCEvent(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC, const TVector3& sourcePos, JPetStatistics& stats) {
+  std::vector<const JPetMCRecoHit*> oPsHits;
+  std::vector<const JPetMCRecoHit*> promptHits;
+  std::vector<JPetRawMCHit> oPsRawHits;
+  std::vector<JPetRawMCHit> promptRawHits;
+  std::vector<int> fVtxValues;      // vertices from oPs hits (for triple check)
+  std::vector<int> fTrueVtxValues;  // vertices confirmed by triple coincidence
+
+  // Process all hits, fill oPsHits, promptHits, and vertex IDs
+  processHits(event, timeWindowMC, stats, oPsHits, promptHits, oPsRawHits, promptRawHits, fVtxValues);
+
+  // Identify vertices with at least 3 hits
+  checkTripleVertex(fVtxValues, fTrueVtxValues);
+
+  // Collect all hits and raw hits for random classification
+  std::vector<const JPetMCRecoHit*> allHits;
+  std::vector<JPetRawMCHit> allRawHits;
+  for (uint i = 0; i < event.getHits().size(); i++) {
+      auto hit = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(i));
+      if (!hit) continue;
+      allHits.push_back(hit);
+      allRawHits.push_back(timeWindowMC->getMCHit<JPetRawMCHit>(hit->getMCindex()));
+  }
+
+  // Separate random hits (vertex not in true vertices)
+  std::vector<const JPetMCRecoHit*> randomHits;
+  std::vector<JPetRawMCHit> randomRawHits;
+
+  for (size_t i = 0; i < allHits.size(); i++) {
+      const auto& rawHit = allRawHits[i];
+      if (std::find(fTrueVtxValues.begin(), fTrueVtxValues.end(), rawHit.getMCVtxIndex()) == fTrueVtxValues.end()) {
+          // Hit with vertex ID NOT in true vertices → random
+          randomHits.push_back(allHits[i]);
+          randomRawHits.push_back(rawHit);
+          stats.fillHistogram("random_tot_true", calculateToT(allHits[i]));
+      }
+  }
+
+  // Fill histograms for true categorized hits (oPs, prompt)
+  fillHistograms(stats, oPsHits, oPsRawHits, promptHits, promptRawHits, fTrueVtxValues, sourcePos);
+
+}
+
+// Extracts hit properties and categorizes them
+void EventCategorizerTools::processHits(const JPetEvent& event, const JPetTimeWindowMC* timeWindowMC, JPetStatistics& stats, 
+                                      std::vector<const JPetMCRecoHit*>& oPsHits, std::vector<const JPetMCRecoHit*>& promptHits, 
+                                      std::vector<JPetRawMCHit>& oPsRawHits, std::vector<JPetRawMCHit>& promptRawHits, std::vector<int>& fVtxValues) 
+{
+  for (uint i = 0; i < event.getHits().size(); i++) {
+      auto hit = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(i));
+      if (!hit) continue;
+
+      stats.fillHistogram("all_tot_true", calculateToT(hit));
+
+      const JPetRawMCHit mcHit = timeWindowMC->getMCHit<JPetRawMCHit>(hit->getMCindex());
+      bool fIsSecondary = false, fIsScattered = false, fContainsPrompt = false, fIsPickOff = false, fIsOPs = false;
+      
+      categorizeHit(mcHit, fIsSecondary, fIsScattered, fContainsPrompt, fIsPickOff, fIsOPs);
+
+      if (fIsOPs && !fIsScattered && !fIsSecondary) {
+          oPsHits.push_back(hit);
+          oPsRawHits.push_back(mcHit);
+          fVtxValues.push_back(mcHit.getMCVtxIndex());
+      }
+      if (fContainsPrompt && !fIsScattered && !fIsSecondary) {
+          promptHits.push_back(hit);
+          promptRawHits.push_back(mcHit);
+      }
+
+
+      if(fIsScattered || fIsSecondary) stats.fillHistogram("scatter_tot_true", calculateToT(hit));
+      if(fContainsPrompt && !fIsScattered && !fIsSecondary) stats.fillHistogram("prompt_tot_true", calculateToT(hit));
+      if(fIsPickOff) stats.fillHistogram("2g_tot_true", calculateToT(hit));
+  }
+}
+
+// Determines hit category based on hit type
+void EventCategorizerTools::categorizeHit(const JPetRawMCHit& mcHit, bool& fIsSecondary, bool& fIsScattered, bool& fContainsPrompt, 
+                                          bool& fIsPickOff, bool& fIsOPs) 
+{
+  int hitType = mcHit.getGammaTag();
+  int hitNumber = hitType % 10;
+  int n = 1;
+
+  if (hitType % 100 != 0 && hitNumber != 0 && hitType > 10) fIsScattered = true;
+  if (hitNumber == 1) fContainsPrompt = true;
+  else if (hitNumber == 2) fIsPickOff = true;
+  else if (hitNumber == 3) fIsOPs = true;
+  else if (hitNumber == 0) {
+      fIsSecondary = true;
+      while (hitNumber == 0 && hitType > 0) {
+          n *= 10;
+          hitNumber = (hitType / n) % 10;
+          if (hitType % (n * 100) == 0 && hitNumber != 0 && hitType / n > 10)
+              fIsScattered = true;
+      }
+  }
+}
+
+void EventCategorizerTools::checkTripleVertex(const std::vector<int>& fVtxValues, std::vector<int>& fTrueVtxValues) {
+  if (fVtxValues.size() < 3) return;
+
+  std::map<int, int> vtxCount;
+  for (const auto& vtx : fVtxValues) vtxCount[vtx]++;
+  
+  for (const auto& entry : vtxCount) {
+      if (entry.second >= 3) fTrueVtxValues.push_back((int)entry.first);
+  }
+}
+
+// Fills histograms based on categorized hits
+void EventCategorizerTools::fillHistograms(JPetStatistics& stats, const std::vector<const JPetMCRecoHit*>& oPsHits, const std::vector<JPetRawMCHit>& oPsRawHits, 
+                                          const std::vector<const JPetMCRecoHit*>& promptHits, const std::vector<JPetRawMCHit>& promptRawHits, std::vector<int>& fTrueVtxValues, const TVector3& sourcePos) 
+{
+  bool vtxCheck, promptVtxCheck = false;
+  int n_ops = 0;
+  std::vector<int> true_oPsHits;      // Store indices of true oPs
+  std::vector<int> true_promptHits;   // Store indices of true prompts
+  for (int i = 0; i<oPsHits.size(); i++) {
+      vtxCheck = false;
+      promptVtxCheck = false;
+      const auto& oPs = oPsHits[i];
+      const auto& oPsRaw = oPsRawHits[i];
+      stats.fillHistogram("3g_tot_true", calculateToT(oPs));
+      if(checkVertex(oPsRaw, fTrueVtxValues)) vtxCheck = true;
+      for (size_t j = 0; j < promptRawHits.size(); j++) {
+        if (checkVertex(promptRawHits[j], {oPsRawHits[i].getMCVtxIndex()})) {
+            promptVtxCheck = true;
+            true_promptHits.push_back(j); // Store index of true prompt hit
+        }
+    }
+
+      if(vtxCheck&&promptVtxCheck){
+        n_ops++;
+        true_oPsHits.push_back(i);
+        stats.fillHistogram("ap_3g_tot_true", calculateToT(oPs));
+      }
+  }
+
+  if (true_oPsHits.size() < 3) return; 
+
+  std::vector<const JPetMCRecoHit*> sortedHits = {
+    oPsHits[true_oPsHits[0]],
+    oPsHits[true_oPsHits[1]],
+    oPsHits[true_oPsHits[2]]
+  };
+
+  /*std::sort(sortedHits.begin(), sortedHits.end(), 
+  [](const JPetMCRecoHit* a, const JPetMCRecoHit* b) {
+      return calculateToT(a) > calculateToT(b);
+  });*/
+
+  std::random_device rd;
+  std::default_random_engine rng(rd());
+  std::shuffle(sortedHits.begin(), sortedHits.end(), rng);
+  
+  // Assign sorted hits
+  const auto* firstHit  = sortedHits[0];
+  const auto* secondHit = sortedHits[1];
+  const auto* thirdHit  = sortedHits[2];
+
+
+  double time_hit1 = firstHit->getTime();
+  double time_hit2 = secondHit->getTime();
+  double time_hit3 = thirdHit->getTime();
+
+  std::vector<double> time_Diffs = {time_hit1 - time_hit2, time_hit2 - time_hit3, time_hit3 - time_hit1};
+
+  vector<double> relativeAngles;
+  relativeAngles.push_back(TMath::RadToDeg() * firstHit->getPos().Angle(secondHit->getPos()));
+  relativeAngles.push_back(TMath::RadToDeg() * secondHit->getPos().Angle(thirdHit->getPos()));
+  relativeAngles.push_back(TMath::RadToDeg() * thirdHit->getPos().Angle(firstHit->getPos()));
+  sort(relativeAngles.begin(), relativeAngles.end());
+
+  double transformedX = relativeAngles.at(1) + relativeAngles.at(0);
+  double transformedY = relativeAngles.at(1) - relativeAngles.at(0);
+
+  double DOP = calculatePlanePointDistance(firstHit, secondHit, thirdHit, sourcePos);
+
+  for(double timeDiff : time_Diffs) stats.fillHistogram("ap_3g_timeDiff_true", timeDiff);
+  stats.fillHistogram("ap_3g_rel_angles_true", transformedX, transformedY);
+
+  if (!oPsHits.empty()) {
+      stats.fillHistogram("3g_stats_multi_annihilations_true", oPsHits.size());
+      if(n_ops>0) stats.fillHistogram("ap_3g_stats_multi_annihilations_true", n_ops);
+      stats.fillHistogram("3g_stats_multi_prompts_true", promptHits.size());
+  }
+}
+
+bool EventCategorizerTools::checkVertex(const JPetRawMCHit& rawHit, const std::vector<int> fTrueVtxValues){
+  return std::find(fTrueVtxValues.begin(), fTrueVtxValues.end(), rawHit.getMCVtxIndex()) != fTrueVtxValues.end();
+}
+
+
+// bool EventCategorizerTools::checkFor1Gamma(const JPetEvent& event, const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax, double totCutAnniMin_larger, 
+//                                           double totCutAnniMax_larger, double totCutDeexMin, double totCutDeexMax, JPetStatistics& stats, bool saveHistos)
+// {
+//   if (event.getHits().size() != 2)
+//   {
+//     return false;
+//   }
+  
+//   vector<const JPetPhysRecoHit*> prompts;
+//   vector<vector<const JPetPhysRecoHit*>> annihilations;
+
+//   // First check if any of the hits in the event is prompt based on TOT selection
+//   for (uint i = 0; i < event.getHits().size(); i++)
+//   {
+//     bool totCut = false, totCut_larger = false;
+//     auto promptHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
+//     if (saveHistos)
+//     {
+//       double hitTot = promptHit->getToT();
+//       stats.fillHistogram("1g_tot", hitTot);
+//       if(checkToT(promptHit, totCutAnniMin, totCutAnniMax))
+//       {
+//         totCut = true;
+        
+//         stats.fillHistogram("1g_tot_tot", hitTot);
+//       }
+//       if(checkToT(promptHit, totCutAnniMin_larger, totCutAnniMax_larger))
+//       {
+//         totCut_larger = true;
+//         stats.fillHistogram("1g_tot_larger_tot", hitTot);
+//       }
+//     }
+//     if (checkToT(promptHit, totCutDeexMin, totCutDeexMax))
+//     {
+//       prompts.push_back(promptHit);
+//       if (saveHistos)
+//       {
+//         stats.fillHistogram("1g_prompt_tot", promptHit->getToT());
+//       }
+//     }
+//   }
+//   if (prompts.size() != 1)
+//   {
+//     return false;
+//   }
+
+//   for (uint i = 0; i < event.getHits().size(); i++)
+//   {
+//     auto hit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
+//     if (!hit)
+//     {
+//       continue;
+//     }
+
+//     vector<const JPetPhysRecoHit*> annih_temp = {hit};
+//     annihilations.push_back(annih_temp);
+//   }
+
+//   if (annihilations.size() == 0)
+//   {
+//     return false;
+//   }
+
+//   double is1Gamma = false;
+
+//   // Iterating over all combinations of found pairs and prompt photons
+//   for (auto pair1g : annihilations)
+//   {
+//     for (auto prompt : prompts)
+//     {
+//       // Caculate event times - annihilation
+//       double annihTime = pair1g[0]->getTime() - calculateTOF(pair1g[0], sourcePos);
+//       double promptTime = prompt->getTime() - calculateTOF(prompt, sourcePos);
+//       double tot_annih = pair1g[0]->getToT();
+//       double tot_prompt = prompt->getToT();
+  
+//       // Calculate lifetime
+//       double lifetime = annihTime - promptTime;
+
+//       if (saveHistos)
+//       {
+//         stats.fillHistogram("lifetime_1g_prompt", lifetime);
+//         stats.fillHistogram("lifetime_1g_prompt_zoom", lifetime);
+//         if(checkToT(pair1g[0], totCutAnniMin, totCutAnniMax)){ 
+//           is1Gamma = true;
+//           stats.fillHistogram("lifetime_tot_1g_prompt", lifetime);
+//           stats.fillHistogram("lifetime_tot_1g_prompt_zoom", lifetime);
+//         }
+//         if(checkToT(pair1g[0], totCutAnniMin_larger, totCutAnniMax_larger)) {
+//           stats.fillHistogram("lifetime_tot_larger_1g_prompt", lifetime);
+//           stats.fillHistogram("lifetime_tot_larger_1g_prompt_zoom", lifetime);
+//         }
+//       }
+        
+//     }
+//   }
+  
+//   return is1Gamma;
+// }
 
 /**
  * Method for determining type of event - back to back 2 gamma
@@ -345,7 +666,7 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
           stats.fillHistogram("3g_tot", firstHit->getToT());
           stats.fillHistogram("3g_tot", secondHit->getToT());
           stats.fillHistogram("3g_tot", thirdHit->getToT());
-          stats.fillHistogram("3g_timeDiff", timeDiff);
+          for(int time_ind = 0; time_ind < 3; time_ind++) stats.fillHistogram("3g_timeDiff", timeDiffs[time_ind]);
 	        stats.fillHistogram("3g_rel_angles", transformedX, transformedY);
         }
         bool totCut = false, thetaCut = false, tDiffCut = false;
@@ -358,11 +679,11 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
             stats.fillHistogram("tot_3g_tot", firstHit->getToT());
             stats.fillHistogram("tot_3g_tot", secondHit->getToT());
             stats.fillHistogram("tot_3g_tot", thirdHit->getToT());
-            stats.fillHistogram("tot_3g_timeDiff", timeDiff);
+            for(int time_ind = 0; time_ind < 3; time_ind++) stats.fillHistogram("tot_3g_timeDiff", timeDiffs[time_ind]);
             stats.fillHistogram("tot_3g_rel_angles", transformedX, transformedY);
           }
         }
-        if(transformedX > minRelAngleCut)
+        if(transformedX > minRelAngleCut & transformedY < 80)
         {
           thetaCut = true;
           if (saveHistos)
@@ -370,7 +691,7 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
             stats.fillHistogram("theta_3g_tot", firstHit->getToT());
             stats.fillHistogram("theta_3g_tot", secondHit->getToT());
             stats.fillHistogram("theta_3g_tot", thirdHit->getToT());
-            stats.fillHistogram("theta_3g_timeDiff", timeDiff);
+            for(int time_ind = 0; time_ind < 3; time_ind++) stats.fillHistogram("theta_3g_timeDiff", timeDiffs[time_ind]);
             stats.fillHistogram("theta_3g_rel_angles", transformedX, transformedY);
           }
         }
@@ -383,7 +704,7 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
             stats.fillHistogram("tdiff_3g_tot", firstHit->getToT());
             stats.fillHistogram("tdiff_3g_tot", secondHit->getToT());
             stats.fillHistogram("tdiff_3g_tot", thirdHit->getToT());
-            stats.fillHistogram("tdiff_3g_timeDiff", timeDiff);
+            for(int time_ind = 0; time_ind < 3; time_ind++) stats.fillHistogram("tdiff_3g_timeDiff", timeDiffs[time_ind]);
             stats.fillHistogram("tdiff_3g_rel_angles", transformedX, transformedY);
           }
         }
@@ -394,9 +715,9 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
             stats.fillHistogram("ap_3g_tot", firstHit->getToT());
             stats.fillHistogram("ap_3g_tot", secondHit->getToT());
             stats.fillHistogram("ap_3g_tot", thirdHit->getToT());
-            stats.fillHistogram("ap_3g_timeDiff", timeDiff);
+            for(int time_ind = 0; time_ind < 3; time_ind++) stats.fillHistogram("ap_3g_timeDiff", timeDiffs[time_ind]);
             stats.fillHistogram("ap_3g_rel_angles", transformedX, transformedY);
-          }
+	        }
       }
       }
     }
@@ -404,15 +725,16 @@ bool EventCategorizerTools::checkFor3Gamma(const JPetEvent& event, double minRel
   return is3Gamma;
 }
 
-bool EventCategorizerTools::checkFor2GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, JPetStatistics& stats, bool saveHistos, double maxThetaDiff, 
+bool EventCategorizerTools::checkFor2GammaLifetime(const JPetEvent& event, std::vector<int> bad_ID, JPetStatistics& stats, bool saveHistos, double maxZ, double maxThetaDiff, 
                                                   double maxTimeDiff, double maxDOP, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin, double totCutDeexMax, 
                                                   const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, double scatterTimeMin, double scatterTimeMax, 
                                                   double scatterAngleMin, double scatterAngleMax) {
 
   // Step 1: Initial checks and histogram filling for hits
-  fillHitHistograms(event, stats, saveHistos, "none_2g_tot");
+  stats.fillHistogram("multiplicity", event.getHits().size());
+  fillHitHistograms(event, stats, saveHistos, "none_2g_tot", "none_2g_z", "none_2g_z_ID");
   if (event.getHits().size() < 2) return false;
-  fillHitHistograms(event, stats, saveHistos, "hits_2g_tot");
+  fillHitHistograms(event, stats, saveHistos, "hits_2g_tot", "hits_2g_z", "hits_2g_z_ID");
   // Step 2: Identify prompt and annihilation hits
   std::vector<const JPetPhysRecoHit*> prompts;
   std::vector<std::pair<const JPetPhysRecoHit*, const JPetPhysRecoHit*>> annihilations;
@@ -423,10 +745,12 @@ bool EventCategorizerTools::checkFor2GammaLifetime(const JPetEvent& event, std::
   identifyAnnihilationHits(event, totCutAnniMin, totCutAnniMax, annihilations, annihilationsMC);
 
   bool isLifetimeEvent = false;
+
+  vector<pair<double, int>> DOP_values = {}; 
   
-  if(!annihilations.empty()) isLifetimeEvent = processHistograms(annihilations, stats, saveHistos, maxThetaDiff, maxTimeDiff, maxDOP, 
+  if(!annihilations.empty()) isLifetimeEvent = processHistograms(annihilations, DOP_values, stats, saveHistos, maxZ, maxThetaDiff, maxTimeDiff, maxDOP, 
                            sourcePos, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin, scatterAngleMax);
-  else if(!annihilationsMC.empty()) isLifetimeEvent = processHistograms(annihilationsMC, stats, saveHistos, maxThetaDiff, maxTimeDiff, maxDOP, 
+  else if(!annihilationsMC.empty()) isLifetimeEvent = processHistograms(annihilationsMC, DOP_values, stats, saveHistos, maxZ, maxThetaDiff, maxTimeDiff, maxDOP, 
                            sourcePos, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin, scatterAngleMax);
   else return false;
 
@@ -434,22 +758,21 @@ bool EventCategorizerTools::checkFor2GammaLifetime(const JPetEvent& event, std::
     auto promptHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
     auto promptHitMC = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(i));
 
-      if(promptHit && checkToT(promptHit, totCutAnniMin, totCutAnniMax)) {
+      if(promptHit && fabs(promptHit->getPosZ())<maxZ && checkToT(promptHit, totCutDeexMin, totCutDeexMax)) {
         prompts.push_back(promptHit);
       }
-      else if(promptHitMC && checkToT(promptHitMC, totCutAnniMin, totCutAnniMax)) {
+      else if(promptHitMC && fabs(promptHitMC->getPosZ())<maxZ && checkToT(promptHitMC, totCutDeexMin, totCutDeexMax)) {
         promptsMC.push_back(promptHitMC);
       }
   }
 
-  if ((!annihilations.empty() && prompts.size() != 1) || 
-      (!annihilationsMC.empty() && promptsMC.size() != 1)) {
+  if (prompts.size() != 1 && promptsMC.size() != 1) {
       return false;
   }
 
   if(isLifetimeEvent){
-    fillAnnihilationHistograms(annihilations, prompts, stats, sourcePos, totCutAnniMin, totCutAnniMax);
-    fillAnnihilationHistograms(annihilationsMC, promptsMC, stats, sourcePos, totCutAnniMin, totCutAnniMax);
+    fillAnnihilationHistograms(annihilations, prompts, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
+    fillAnnihilationHistograms(annihilationsMC, promptsMC, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
   }
 
 
@@ -457,16 +780,18 @@ bool EventCategorizerTools::checkFor2GammaLifetime(const JPetEvent& event, std::
   return isLifetimeEvent;
 }
 
-bool EventCategorizerTools::checkFor3GammaLifetime(const JPetEvent& event, vector<int> bad_ID, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff, double maxDOP, JPetStatistics& stats, 
+bool EventCategorizerTools::checkFor3GammaLifetime( const JPetTimeWindowMC* timeWindowMC, const JPetEvent& event, vector<int> bad_ID, double maxZ, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff, double maxDOP, JPetStatistics& stats, 
                             bool saveHistos, double totCutAnniMin, double totCutAnniMax, double totCutDeexMin, double totCutDeexMax, const TVector3& sourcePos, 
                             ScatterTestType testType, double scatterTestValue, double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, 
                             double scatterAngleMax)
 {
 
   // Step 1: Initial checks and histogram filling for hits
-  fillHitHistograms(event, stats, saveHistos, "none_3g_tot");
-  if (event.getHits().size() < 3) return false;
-  fillHitHistograms(event, stats, saveHistos, "hits_3g_tot");
+  fillHitHistograms(event, stats, saveHistos, "none_3g_tot", "none_3g_z", "none_3g_z_ID");
+  if (event.getHits().size() < 4) return false;
+  fillHitHistograms(event, stats, saveHistos, "hits_3g_tot", "hits_3g_z", "hits_3g_z_ID");
+
+  stats.fillHistogram("efficiency_3g", 1);
 
   std::vector<const JPetPhysRecoHit*> prompts;
   std::vector<std::vector<const JPetPhysRecoHit*>> annihilations;
@@ -480,9 +805,9 @@ bool EventCategorizerTools::checkFor3GammaLifetime(const JPetEvent& event, vecto
 
   bool isLifetimeEvent = false;
   
-  if(!annihilations.empty()) isLifetimeEvent = processHistograms(annihilations, DOP_values, stats, saveHistos, minRelAngleCut, minRelPhiCut, minDistCut, maxTimeDiff, maxDOP, 
+  if(!annihilations.empty()) isLifetimeEvent = processHistograms(timeWindowMC, annihilations, DOP_values, stats, saveHistos, maxZ, minRelAngleCut, minRelPhiCut, minDistCut, maxTimeDiff, maxDOP, 
                            sourcePos, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin, scatterAngleMax);
-  else if(!annihilationsMC.empty()) isLifetimeEvent = processHistograms(annihilationsMC, DOP_values, stats, saveHistos,  minRelAngleCut, minRelPhiCut, minDistCut, maxTimeDiff, maxDOP, 
+  else if(!annihilationsMC.empty()) isLifetimeEvent = processHistograms(timeWindowMC, annihilationsMC, DOP_values, stats, saveHistos, maxZ, minRelAngleCut, minRelPhiCut, minDistCut, maxTimeDiff, maxDOP, 
                            sourcePos, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin, scatterAngleMax);
   else return false;
 
@@ -491,22 +816,24 @@ bool EventCategorizerTools::checkFor3GammaLifetime(const JPetEvent& event, vecto
     auto promptHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
     auto promptHitMC = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(i));
 
-      if(promptHit && checkToT(promptHit, totCutAnniMin, totCutAnniMax)) {
+      if(promptHit && fabs(promptHit->getPosZ())<maxZ && checkToT(promptHit, totCutDeexMin, totCutDeexMax)) {
         prompts.push_back(promptHit);
       }
-      else if(promptHitMC && checkToT(promptHitMC, totCutAnniMin, totCutAnniMax)) {
+      else if(promptHitMC && fabs(promptHitMC->getPosZ())<maxZ && checkToT(promptHitMC, totCutDeexMin, totCutDeexMax)) {
         promptsMC.push_back(promptHitMC);
       }
   }
 
-  if ((!annihilations.empty() && prompts.size() != 1) || 
-      (!annihilationsMC.empty() && promptsMC.size() != 1)) {
+  if (prompts.size() != 1 && promptsMC.size() != 1) {
       return false;
   }
 
+  sort(DOP_values.begin(), DOP_values.end());
+  
+
   if(isLifetimeEvent){
-    fillAnnihilationHistograms(annihilations, prompts, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
-    fillAnnihilationHistograms(annihilationsMC, promptsMC, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
+    fillAnnihilationHistograms(timeWindowMC, annihilations, prompts, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
+    fillAnnihilationHistograms(timeWindowMC, annihilationsMC, promptsMC, DOP_values, stats, sourcePos, totCutAnniMin, totCutAnniMax);
   }
   //cout<<"Prompt: "<<prompt_idx<<endl;
   // Then looking for annihilation back to back pairs
@@ -515,20 +842,20 @@ bool EventCategorizerTools::checkFor3GammaLifetime(const JPetEvent& event, vecto
 }
 
 template <typename HitType>
-bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, 
-                                                JPetStatistics& stats, bool saveHistos, double maxThetaDiff, double maxTimeDiff, double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
+bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
+                                                JPetStatistics& stats, bool saveHistos, double maxZ, double maxThetaDiff, double maxTimeDiff, double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
                                                 double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax) {
 
   bool isLifetimeEvent = false;
-  double tdiff_min = 3500, tdiff_max = 5000;
+  int annih_ind = 0;
 
   for (const auto& pair2g : annihilations) {
     // Calculate the annihilation point position
     TVector3 annhilationPoint = calculateAnnihilationPoint(pair2g.first, pair2g.second);
 
     // Caculate event times - annihilation
-    double annihTime1 = pair2g.first->getTime() - calculateTOF(pair2g.first);
-    double annihTime2 = pair2g.second->getTime() - calculateTOF(pair2g.second);
+    double annihTime1 = pair2g.first->getTime() - calculateTOF(pair2g.first, sourcePos);
+    double annihTime2 = pair2g.second->getTime() - calculateTOF(pair2g.second, sourcePos);
 
     int scinID_annih1 = pair2g.first->getScin().getID();
     int scinID_annih2 = pair2g.second->getScin().getID();   
@@ -539,6 +866,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
     double dist_annih1_annih2 = calculateDistance(pair2g.second, pair2g.first);
 
     double timeDiff = pair2g.second->getTime()-pair2g.first->getTime();
+    double timeDiff_annih = annihTime2-annihTime1;
 
     TVector3 firstVec = pair2g.first->getPos();
     TVector3 secondVec = pair2g.second->getPos();
@@ -550,6 +878,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
     bool tDiffCut = fabs(timeDiff) < maxTimeDiff;
     bool scatterCut = !checkForScatter(pair2g.first, pair2g.second, stats, false, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin, scatterAngleMax);
     bool DOPCut = DOP < maxDOP;
+    bool zCut = fabs(pair2g.first->getPosZ()) < maxZ && fabs(pair2g.second->getPosZ()) < maxZ;
 
   
     if (saveHistos)
@@ -558,32 +887,12 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
       stats.fillHistogram("2g_tot", tot2);
       stats.fillHistogram("2g_theta", theta);
       stats.fillHistogram("2g_timeDiff_theta", timeDiff, theta);
-      stats.fillHistogram("2g_timeDiff", timeDiff);
+      stats.fillHistogram("2g_timeDiff", timeDiff_annih);
       stats.fillHistogram("2g_DOP", DOP);
-      stats.fillHistogram("2g_time_annih_12", pair2g.second->getTime(), pair2g.first->getTime());
-      stats.fillHistogram("2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
+      stats.fillHistogram("2g_scatter_test_time", fabs(timeDiff) - dist_annih1_annih2/kLightVelocity_cm_ps);
+      stats.fillHistogram("2g_dist", dist_annih1_annih2);
       stats.fillHistogram("2g_ID_all", scinID_annih1);
       stats.fillHistogram("2g_ID_all", scinID_annih2);
-      /*if(fabs(timeDiff)>tdiff_min&&fabs(timeDiff)<tdiff_max){
-        stats.fillHistogram("2g_xy_peak", firstVec.X(), firstVec.Y());
-        stats.fillHistogram("2g_zx_peak", firstVec.Z(), firstVec.X());
-        stats.fillHistogram("2g_xy_peak", secondVec.X(), secondVec.Y());
-        stats.fillHistogram("2g_zx_peak", secondVec.Z(), secondVec.X());
-        stats.fillHistogram("2g_ID_peak", scinID_annih1);
-        stats.fillHistogram("2g_ID_peak", scinID_annih2);
-        stats.fillHistogram("2g_time_annih_12_peak", pair2g.first->getTime(), pair2g.second->getTime());
-        stats.fillHistogram("2g_xy_source_peak", annhilationPoint.X(), annhilationPoint.Y());
-        stats.fillHistogram("2g_zx_source_peak", annhilationPoint.Z(), annhilationPoint.X());
-      }
-      else{
-        stats.fillHistogram("2g_ID_remain", scinID_annih1);
-        stats.fillHistogram("2g_ID_remain", scinID_annih2);
-
-      }*/
-    //DOP cut
-    if(DOP < maxDOP){
-      DOPCut = true;
-    }
     // Scatter cut
     if (!(checkForScatter(pair2g.first, pair2g.second, stats, false, testType, scatterTestValue, scatterTimeMin, scatterTimeMax, scatterAngleMin,
                           scatterAngleMax))){
@@ -591,25 +900,25 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
         stats.fillHistogram("scatter_2g_tot", tot1);
         stats.fillHistogram("scatter_2g_tot", tot2);
         stats.fillHistogram("scatter_2g_theta", theta);
-        stats.fillHistogram("scatter_2g_timeDiff", timeDiff);
+        stats.fillHistogram("scatter_2g_timeDiff", timeDiff_annih);
         stats.fillHistogram("scatter_2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
-        /*if(fabs(timeDiff)>tdiff_min&&fabs(timeDiff)<tdiff_max){
-          stats.fillHistogram("scatter_2g_xy_peak", firstVec.X(), firstVec.Y());
-          stats.fillHistogram("scatter_2g_zx_peak", firstVec.Z(), firstVec.X());
-          stats.fillHistogram("scatter_2g_xy_peak", secondVec.X(), secondVec.Y());
-          stats.fillHistogram("scatter_2g_zx_peak", secondVec.Z(), secondVec.X());
-          stats.fillHistogram("scatter_2g_xy_source_peak", annhilationPoint.X(), annhilationPoint.Y());
-          stats.fillHistogram("scatter_2g_zx_source_peak", annhilationPoint.Z(), annhilationPoint.X());
-        }*/
     }
-    if (fabs(timeDiff) < maxTimeDiff)
+    if (zCut)
     {
-      tDiffCut = true;
+        stats.fillHistogram("z_2g_tot", tot1);
+        stats.fillHistogram("z_2g_tot", tot2);
+        stats.fillHistogram("z_2g_theta", theta);
+        stats.fillHistogram("z_2g_timeDiff", timeDiff_annih);
+        stats.fillHistogram("z_2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
+    }
+    if (tDiffCut)
+    {
         stats.fillHistogram("tdiff_2g_tot", tot1);
         stats.fillHistogram("tdiff_2g_tot", tot2);
         stats.fillHistogram("tdiff_2g_theta", theta);
-        stats.fillHistogram("tdiff_2g_timeDiff", timeDiff);
-        stats.fillHistogram("tdiff_2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
+        stats.fillHistogram("tdiff_2g_timeDiff", timeDiff_annih);
+        stats.fillHistogram("tdiff_2g_scatter_test_time", fabs(timeDiff) - dist_annih1_annih2/kLightVelocity_cm_ps);
+        stats.fillHistogram("tdiff_2g_dist", dist_annih1_annih2);
     }
       // Time difference cut
     if(thetaCut)
@@ -618,30 +927,21 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
         stats.fillHistogram("theta_2g_tot", tot2);
         stats.fillHistogram("theta_2g_theta", theta);
         stats.fillHistogram("theta_2g_timeDiff_theta", timeDiff, theta);
-        stats.fillHistogram("theta_2g_timeDiff", timeDiff);
+        stats.fillHistogram("theta_2g_timeDiff", timeDiff_annih);
         stats.fillHistogram("theta_2g_ID_all", scinID_annih1);
         stats.fillHistogram("theta_2g_ID_all", scinID_annih2);
         stats.fillHistogram("theta_2g_time_annih_12", pair2g.first->getTime(), pair2g.second->getTime());
-        stats.fillHistogram("theta_2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
-        /*if(fabs(timeDiff)>tdiff_min&&fabs(timeDiff)<tdiff_max){
-          stats.fillHistogram("theta_2g_xy_first_peak", firstVec.X(), firstVec.Y());
-          stats.fillHistogram("theta_2g_zx_first_peak", firstVec.Z(), firstVec.X());
-          stats.fillHistogram("theta_2g_xy_second_peak", secondVec.X(), secondVec.Y());
-          stats.fillHistogram("theta_2g_zx_second_peak", secondVec.Z(), secondVec.X());
-          stats.fillHistogram("theta_2g_xy_source_peak", annhilationPoint.X(), annhilationPoint.Y());
-          stats.fillHistogram("theta_2g_zx_source_peak", annhilationPoint.Z(), annhilationPoint.X());
-          stats.fillHistogram("theta_2g_ID_peak", scinID_annih1);
-          stats.fillHistogram("theta_2g_ID_peak", scinID_annih2); 
-        }*/
+        stats.fillHistogram("theta_2g_scatter_test_time", fabs(timeDiff) - dist_annih1_annih2/kLightVelocity_cm_ps);
+        stats.fillHistogram("theta_2g_dist", dist_annih1_annih2);
 
     }  
-    if(scatterCut && tDiffCut && thetaCut && DOPCut)
+    if(scatterCut && tDiffCut && thetaCut && DOPCut && zCut)
     {
       isLifetimeEvent = true;
       stats.fillHistogram("ap_2g_tot", tot1);
       stats.fillHistogram("ap_2g_tot", tot2);
       stats.fillHistogram("ap_2g_theta", theta);
-      stats.fillHistogram("ap_2g_timeDiff", timeDiff);
+      stats.fillHistogram("ap_2g_timeDiff", timeDiff_annih);
       stats.fillHistogram("ap_2g_scatter_test_time", timeDiff - dist_annih1_annih2/kLightVelocity_cm_ps);
       stats.fillHistogram("ap_xy", annhilationPoint.X(), annhilationPoint.Y());
       stats.fillHistogram("ap_zx", annhilationPoint.Z(), annhilationPoint.X());
@@ -651,31 +951,33 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::pair<const 
       stats.fillHistogram("ap_zx_zoom", annhilationPoint.Z(), annhilationPoint.X());
       stats.fillHistogram("ap_zy_zoom", annhilationPoint.Z(), annhilationPoint.Y());
       stats.fillHistogram("ap_pos_zoom", annhilationPoint.Z(), annhilationPoint.X(), annhilationPoint.Y());
+      DOP_values.push_back(make_pair(DOP, annih_ind));
     }
     }
-
+    annih_ind++;
   }
 
   return isLifetimeEvent;
 }
 
 template <typename HitType>
-bool EventCategorizerTools::processHistograms(const std::vector<std::vector<const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
-                                                JPetStatistics& stats, bool saveHistos, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff,  double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
+bool EventCategorizerTools::processHistograms(const JPetTimeWindowMC* timeWindowMC, const std::vector<std::vector<const HitType*>>& annihilations, std::vector<std::pair<double, int>>& DOP_values,
+                                                JPetStatistics& stats, bool saveHistos, double maxZ, double minRelAngleCut, double minRelPhiCut, double minDistCut, double maxTimeDiff,  double maxDOP, const TVector3& sourcePos, ScatterTestType testType, double scatterTestValue, 
                                                 double scatterTimeMin, double scatterTimeMax, double scatterAngleMin, double scatterAngleMax) {
 
   bool isLifetimeEvent = false;
+
+  bool zCut_event = false, thetaCut_event = false, tDiffCut_event = false, DOPCut_event = false, vtxCut_event = false;
+  bool zCut_signal = false, thetaCut_signal = false, tDiffCut_signal = false, DOPCut_signal = false, vtxCut_signal = false;
 
   int annih_ind = 0;
 
   for (auto pair3g : annihilations)
   {
-    bool totCut_prompt=false, thetaCut_prompt = false, tDiffCut_prompt = false, DOPCut_prompt = false, phiCut_prompt = false, vtxCut_prompt = false;
-    
     // Caculate event times - annihilation
-    double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0]);
-    double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1]);
-    double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2]);
+    double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0], sourcePos);
+    double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1], sourcePos);
+    double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2], sourcePos);
 
     auto tot1 = calculateToT(pair3g[0]);
     auto tot2 = calculateToT(pair3g[1]);
@@ -685,7 +987,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
 
     TVector3 ap = calculateAnnihilationPoint(*pair3g[0], *pair3g[1], *pair3g[2]);
 
-    bool totCut=false, thetaCut = false, tDiffCut = false, DOPCut = false, distCut = false, vtxCut = false, phiCut = false;
+    bool zCut = false, thetaCut = false, tDiffCut = false, DOPCut = false, distCut = false, vtxCut = false, phiCut = false;
 
     vector<double> relativeAngles;
     relativeAngles.push_back(TMath::RadToDeg() * pair3g[0]->getPos().Angle(pair3g[1]->getPos()));
@@ -712,6 +1014,35 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
     vector<double> dist_annih = {calculateDistance(pair3g[0], pair3g[1]), calculateDistance(pair3g[2], pair3g[0]), calculateDistance(pair3g[1], pair3g[2])};
     vector<double> dist_annih2D = {calculateDistance2D(pair3g[0], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[0])};
 
+    std::vector<int> gammaTagsTriplet = {-1000, -1000, -1000};
+    int promptGammaTag = -1000;
+    std::vector<int> gammaVtxTriplet = {-1000, -2000, -3000};
+    int promptGammaVtx = -1000;
+
+
+    for (size_t i = 0; i < pair3g.size(); ++i) {
+      if (const auto* mcHitReco = dynamic_cast<const JPetMCRecoHit*>(pair3g[i])) {
+        const auto mcHit = timeWindowMC->getMCHit<JPetRawMCHit>(mcHitReco->getMCindex());
+        gammaTagsTriplet[i] = mcHit.getGammaTag();
+        gammaVtxTriplet[i] = mcHit.getMCVtxIndex();
+      }
+    }
+  
+
+    bool allVerticesSame = true;
+    if (!gammaVtxTriplet.empty()) {
+      const auto refVtx = gammaVtxTriplet[0];
+      for (const auto& vtx : gammaVtxTriplet) {
+        if (vtx != refVtx) {
+          allVerticesSame = false;
+          break;
+        }
+      }
+    }
+
+    bool allTripletTagsAre3 = std::all_of(gammaTagsTriplet.begin(), gammaTagsTriplet.end(),
+    [](int tag) { return tag == 3; });
+
     if (saveHistos)
     {
       stats.fillHistogram("3g_tot", tot1);
@@ -720,7 +1051,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       stats.fillHistogram("3g_DOP", DOP);
       stats.fillHistogram("3g_rel_angles", transformedX, transformedY);
       for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-        stats.fillHistogram("3g_timeDiff", timeDiffs[tdiff_ind]);
+        stats.fillHistogram("3g_timeDiff", timeDiffs_annih[tdiff_ind]);
         stats.fillHistogram("3g_dist", dist_annih[tdiff_ind]);
         stats.fillHistogram("3g_phi", relative2DAngles[tdiff_ind]);
         stats.fillHistogram("3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -729,16 +1060,37 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       stats.fillHistogram("3g_annihilation_point_xy", ap.X(), ap.Y());
       stats.fillHistogram("3g_annihilation_point_xz", ap.X(), ap.Z());
 
+      if(fabs(pair3g[0]->getPosZ()) < maxZ && fabs(pair3g[1]->getPosZ()) < maxZ && fabs(pair3g[2]->getPosZ()) < maxZ ){
+        zCut = true;
+        zCut_event = true;
+        if (allTripletTagsAre3 && allVerticesSame) zCut_signal = true;
+        stats.fillHistogram("z_3g_DOP", DOP);
+        stats.fillHistogram("z_3g_tot", tot1);
+        stats.fillHistogram("z_3g_tot", tot2);
+        stats.fillHistogram("z_3g_tot", tot3);
+        stats.fillHistogram("z_3g_rel_angles", transformedX, transformedY);
+        for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
+          stats.fillHistogram("z_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
+          stats.fillHistogram("z_3g_phi", relative2DAngles[tdiff_ind]);
+          stats.fillHistogram("z_3g_dist", dist_annih[tdiff_ind]);
+          stats.fillHistogram("z_3g_dist2D", dist_annih2D[tdiff_ind]);
+          stats.fillHistogram("z_3g_scatter_test_time", timeDiffs[tdiff_ind] - dist_annih[tdiff_ind]/kLightVelocity_cm_ps);
+        }
+        stats.fillHistogram("z_3g_annihilation_point_xy", ap.X(), ap.Y());
+        stats.fillHistogram("z_3g_annihilation_point_xz", ap.X(), ap.Z());
+      }
+
       if(DOP < maxDOP){
         DOPCut = true;
-        DOPCut_prompt = true;
+        DOPCut_event = true;
+        if (allTripletTagsAre3 && allVerticesSame) DOPCut_signal = true;
         stats.fillHistogram("DOP_3g_DOP", DOP);
         stats.fillHistogram("DOP_3g_tot", tot1);
         stats.fillHistogram("DOP_3g_tot", tot2);
         stats.fillHistogram("DOP_3g_tot", tot3);
         stats.fillHistogram("DOP_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("DOP_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("DOP_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("DOP_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("DOP_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("DOP_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -749,14 +1101,15 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       }
       if(fabs(timeDiff_annih) < maxTimeDiff){
         tDiffCut = true;
-        tDiffCut_prompt = true;
+        tDiffCut_event = true;
+        if (allTripletTagsAre3 && allVerticesSame) tDiffCut_signal = true;
         stats.fillHistogram("tdiff_3g_DOP", DOP);
         stats.fillHistogram("tdiff_3g_tot", tot1);
         stats.fillHistogram("tdiff_3g_tot", tot2);
         stats.fillHistogram("tdiff_3g_tot", tot3);
         stats.fillHistogram("tdiff_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("tdiff_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("tdiff_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("tdiff_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("tdiff_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("tdiff_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -768,14 +1121,15 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       if(transformedX > minRelAngleCut)
       {
         thetaCut=true;
-        thetaCut_prompt=true;
+        thetaCut_event=true;
+        if (allTripletTagsAre3 && allVerticesSame) thetaCut_signal = true;
         stats.fillHistogram("theta_3g_DOP", DOP);
         stats.fillHistogram("theta_3g_tot", tot1);
         stats.fillHistogram("theta_3g_tot", tot2);
         stats.fillHistogram("theta_3g_tot", tot3);
         stats.fillHistogram("theta_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("theta_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("theta_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("theta_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("theta_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("theta_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -787,14 +1141,13 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       if(fabs(relative2DAngles[0]) > minRelPhiCut && fabs(relative2DAngles[1]) > minRelPhiCut && fabs(relative2DAngles[2]) > minRelPhiCut)
       {
         phiCut=true;
-        phiCut_prompt=true;
         stats.fillHistogram("phi_3g_DOP", DOP);
         stats.fillHistogram("phi_3g_tot", tot1);
         stats.fillHistogram("phi_3g_tot", tot2);
         stats.fillHistogram("phi_3g_tot", tot3);
         stats.fillHistogram("phi_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("phi_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("phi_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("phi_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("phi_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("phi_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -811,7 +1164,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
         stats.fillHistogram("phi0_3g_tot", tot3);
         stats.fillHistogram("phi0_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("phi0_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("phi0_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("phi0_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("phi0_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("phi0_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -831,7 +1184,7 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
         stats.fillHistogram("dist_3g_tot", tot3);
         stats.fillHistogram("dist_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("dist_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("dist_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("dist_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("dist_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("dist_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -844,14 +1197,15 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
       if(ap.X()*ap.X()+ap.Y()*ap.Y() < 10000000*20.*20. && fabs(ap.Z())<10000000*10.)
       {
         vtxCut=true;
-        vtxCut_prompt=true;
+        vtxCut_event=true;
+        if (allTripletTagsAre3 && allVerticesSame) vtxCut_signal = true;
         stats.fillHistogram("vtx_3g_DOP", DOP);
         stats.fillHistogram("vtx_3g_tot", tot1);
         stats.fillHistogram("vtx_3g_tot", tot2);
         stats.fillHistogram("vtx_3g_tot", tot3);
         stats.fillHistogram("vtx_3g_rel_angles", transformedX, transformedY);
         for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-          stats.fillHistogram("vtx_3g_timeDiff", timeDiffs[tdiff_ind]);
+          stats.fillHistogram("vtx_3g_timeDiff", timeDiffs_annih[tdiff_ind]);
           stats.fillHistogram("vtx_3g_phi", relative2DAngles[tdiff_ind]);
           stats.fillHistogram("vtx_3g_dist", dist_annih[tdiff_ind]);
           stats.fillHistogram("vtx_3g_dist2D", dist_annih2D[tdiff_ind]);
@@ -860,32 +1214,36 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
         stats.fillHistogram("vtx_3g_annihilation_point_xy", ap.X(), ap.Y());
         stats.fillHistogram("vtx_3g_annihilation_point_xz", ap.X(), ap.Z());
       }
-      if(thetaCut&&tDiffCut&&DOPCut&&vtxCut&&phiCut){
+      if(zCut&&thetaCut&&tDiffCut&&DOPCut&&vtxCut){
         DOP_values.push_back(make_pair(DOP, annih_ind));
         isLifetimeEvent = true;
       }
 
-      annih_ind++;
-      stats.fillHistogram("3g_cut_stats", 1);
-      if(DOPCut_prompt) stats.fillHistogram("3g_cut_stats", 2);
-      if(tDiffCut_prompt) stats.fillHistogram("3g_cut_stats", 3);
-      if(thetaCut_prompt) stats.fillHistogram("3g_cut_stats", 4); 
-      if(phiCut_prompt) stats.fillHistogram("3g_cut_stats", 5);   
-  
+      annih_ind++;  
+
     }
   }
+
+  if(zCut_event) stats.fillHistogram("efficiency_3g", 2);
+  if(thetaCut_event) stats.fillHistogram("efficiency_3g", 3);
+  if(tDiffCut_event) stats.fillHistogram("efficiency_3g", 4);
+  if(DOPCut_event) stats.fillHistogram("efficiency_3g", 5);
+  if(vtxCut_event) stats.fillHistogram("efficiency_3g", 6);
+
+  if(zCut_signal) stats.fillHistogram("efficiency_3g_signal", 2);
+  if(thetaCut_signal) stats.fillHistogram("efficiency_3g_signal", 3);
+  if(tDiffCut_signal) stats.fillHistogram("efficiency_3g_signal", 4);
+  if(DOPCut_signal) stats.fillHistogram("efficiency_3g_signal", 5);
+  if(vtxCut_signal) stats.fillHistogram("efficiency_3g_signal", 6);
 
   sort(DOP_values.begin(), DOP_values.end());
 
   if(isLifetimeEvent){
-
-    stats.fillHistogram("3g_cut_stats", 6);  
-
     auto pair3g = annihilations[DOP_values[0].second];
 
-    double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0]);
-    double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1]);
-    double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2]);
+    double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0], sourcePos);
+    double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1], sourcePos);
+    double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2], sourcePos);
 
     auto tot1 = calculateToT(pair3g[0]);
     auto tot2 = calculateToT(pair3g[1]);
@@ -911,20 +1269,57 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
     double timeDiff = *max_element(timeDiffs.begin(), timeDiffs.end(), 
                                     [](double a, double b){ return std::fabs(a) < std::fabs(b);});
 
+    vector<double> timeDiffs_annih = {annihTime1 - annihTime2, annihTime2 - annihTime3, annihTime3 - annihTime1};
+    double timeDiff_annih = *max_element(timeDiffs_annih.begin(), timeDiffs_annih.end(), 
+                                  [](double a, double b){ return std::fabs(a) < std::fabs(b);});
+                                    
     vector<double> dist_annih = {calculateDistance(pair3g[0], pair3g[1]), calculateDistance(pair3g[2], pair3g[1]), calculateDistance(pair3g[2], pair3g[0])};
     vector<double> dist_annih2D = {calculateDistance2D(pair3g[0], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[0])};
 
+    std::vector<int> gammaTagsTriplet = {-1000, -1000, -1000};
+    int promptGammaTag = -1000;
+    std::vector<int> gammaVtxTriplet = {-1000, -2000, -3000};
+    int promptGammaVtx = -1000;
+
+    for (size_t i = 0; i < pair3g.size(); ++i) {
+      if (const auto* mcHitReco = dynamic_cast<const JPetMCRecoHit*>(pair3g[i])) {
+        const auto mcHit = timeWindowMC->getMCHit<JPetRawMCHit>(mcHitReco->getMCindex());
+        gammaTagsTriplet[i] = mcHit.getGammaTag();
+        gammaVtxTriplet[i] = mcHit.getMCVtxIndex();
+      }
+    }
+  
+
+    bool allVerticesSame = true;
+    if (!gammaVtxTriplet.empty()) {
+      const auto refVtx = gammaVtxTriplet[0];
+      for (const auto& vtx : gammaVtxTriplet) {
+        if (vtx != refVtx) {
+          allVerticesSame = false;
+          break;
+        }
+      }
+    }
+
+    bool allTripletTagsAre3 = std::all_of(gammaTagsTriplet.begin(), gammaTagsTriplet.end(),
+    [](int tag) { return tag == 3; });
+
+    stats.fillHistogram("efficiency_3g", 7);
+    if(allVerticesSame && allTripletTagsAre3) stats.fillHistogram("efficiency_3g_signal", 7);
+
     stats.fillHistogram("ap_3g_tot", tot1);
-    stats.fillHistogram("ap_3g_tot_", tot2);
+    stats.fillHistogram("ap_3g_tot", tot2);
     stats.fillHistogram("ap_3g_tot", tot3);
     stats.fillHistogram("ap_3g_DOP", DOP_values[0].first);
     stats.fillHistogram("ap_3g_rel_angles", transformedX, transformedY);
     for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
       stats.fillHistogram("ap_3g_timeDiff", timeDiffs[tdiff_ind]);
+      stats.fillHistogram("ap_3g_timeDiff_annih", timeDiffs_annih[tdiff_ind]);
       stats.fillHistogram("ap_3g_phi", relative2DAngles[tdiff_ind]);
       stats.fillHistogram("ap_3g_dist", dist_annih[tdiff_ind]);
       stats.fillHistogram("ap_3g_dist2D", dist_annih2D[tdiff_ind]);
       stats.fillHistogram("ap_3g_scatter_test_time", timeDiffs[tdiff_ind] - dist_annih[tdiff_ind]/kLightVelocity_cm_ps);
+      stats.fillHistogram("ap_3g_z", pair3g[tdiff_ind]->getPosZ());
     }            
     stats.fillHistogram("ap_3g_annihilation_point_xy", ap.X(), ap.Y()); 
     stats.fillHistogram("ap_3g_annihilation_point_xz", ap.X(), ap.Z()); 
@@ -935,50 +1330,89 @@ bool EventCategorizerTools::processHistograms(const std::vector<std::vector<cons
 
 template <typename HitType>
 void EventCategorizerTools::fillAnnihilationHistograms(const std::vector<std::pair<const HitType*, const HitType*>>& annihilations,
-                                                       const std::vector<const HitType*>& prompts, JPetStatistics& stats, 
+                                                       const std::vector<const HitType*>& prompts, std::vector<std::pair<double, int>>& DOP_values, JPetStatistics& stats, 
                                                        const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax) {
   if (!annihilations.empty() && prompts.size() == 1) {
-    for (const auto& pair2g : annihilations) {
-      double annihTime1 = pair2g.first->getTime() - calculateTOF(pair2g.first);
-      double annihTime2 = pair2g.second->getTime() - calculateTOF(pair2g.second);
-      double promptTime = prompts[0]->getTime() - calculateTOF(prompts[0]);
+    const auto& pair2g = annihilations[DOP_values[0].second];
+    double annihTime1 = pair2g.first->getTime() - calculateTOF(pair2g.first, sourcePos);
+    double annihTime2 = pair2g.second->getTime() - calculateTOF(pair2g.second, sourcePos);
+    double promptTime = prompts[0]->getTime() - calculateTOF(prompts[0], sourcePos);
 
-      TVector3 annhilationPoint = calculateAnnihilationPoint(pair2g.first, pair2g.second);
+    TVector3 annhilationPoint = calculateAnnihilationPoint(pair2g.first, pair2g.second);\
 
-      double lifetime = (annihTime1 + annihTime2) / 2.0 - promptTime;
-      double dist_annih1_annih2 = calculateDistance(pair2g.second, pair2g.first);
+    double lifetime = (annihTime1 + annihTime2) / 2.0 - promptTime;
+    double dist_annih1_annih2 = calculateDistance(pair2g.second, pair2g.first);
 
       // Fill histograms
-      stats.fillHistogram("lifetime_ap_2g_prompt", lifetime);
-      stats.fillHistogram("lifetime_ap_2g_prompt_zoom", lifetime);
-      stats.fillHistogram("ap_2g_tot_lifetime", calculateToT(pair2g.first));
-      stats.fillHistogram("ap_2g_tot_lifetime", calculateToT(pair2g.second));
-      stats.fillHistogram("ap_2g_timeDiff_lifetime", pair2g.first->getTime() - pair2g.second->getTime());
-      stats.fillHistogram("ap_xy_lifetime", annhilationPoint.X(), annhilationPoint.Y());
-      stats.fillHistogram("ap_zx_lifetime", annhilationPoint.Z(), annhilationPoint.X());
-      stats.fillHistogram("ap_zy_lifetime", annhilationPoint.Z(), annhilationPoint.Y());
-      stats.fillHistogram("ap_pos_lifetime", annhilationPoint.Z(), annhilationPoint.X(), annhilationPoint.Y());
-    }
+    stats.fillHistogram("lifetime_ap_2g_prompt", lifetime);
+    stats.fillHistogram("lifetime_ap_2g_prompt_zoom", lifetime);
+    stats.fillHistogram("ap_2g_tot_lifetime", calculateToT(pair2g.first));
+    stats.fillHistogram("ap_2g_tot_lifetime", calculateToT(pair2g.second));
+    stats.fillHistogram("ap_2g_timeDiff_lifetime", pair2g.first->getTime() - pair2g.second->getTime());
+    stats.fillHistogram("ap_xy_lifetime", annhilationPoint.X(), annhilationPoint.Y());
+    stats.fillHistogram("ap_zx_lifetime", annhilationPoint.Z(), annhilationPoint.X());
+    stats.fillHistogram("ap_zy_lifetime", annhilationPoint.Z(), annhilationPoint.Y());
+    stats.fillHistogram("ap_pos_lifetime", annhilationPoint.Z(), annhilationPoint.X(), annhilationPoint.Y());
+    
   }
 }
 
 
 template <typename HitType>
-void EventCategorizerTools::fillAnnihilationHistograms(const std::vector<std::vector<const HitType*>>& annihilations,
+void EventCategorizerTools::fillAnnihilationHistograms(const JPetTimeWindowMC* timeWindowMC, const std::vector<std::vector<const HitType*>>& annihilations,
                                                        const std::vector<const HitType*>& prompts, std::vector<pair<double, int>>& DOP_values, JPetStatistics& stats, 
                                                        const TVector3& sourcePos, double totCutAnniMin, double totCutAnniMax) {
   if (!annihilations.empty() && prompts.size() == 1) {
     stats.fillHistogram("3g_stats_multi_annihilations", annihilations.size());
-    stats.fillHistogram("3g_stats_multi_prompt", prompts.size());
+    stats.fillHistogram("3g_stats_multi_prompts", prompts.size());
 
- {     stats.fillHistogram("3g_cut_stats", 6);  
+ {     //stats.fillHistogram("3g_cut_stats", 6);  
 
       auto pair3g = annihilations[DOP_values[0].second];
 
-      double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0]);
-      double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1]);
-      double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2]);
-      double promptTime = prompts[0]->getTime()-calculateTOF(prompts[0]);
+      std::vector<int> gammaTagsTriplet = {-1000, -1000, -1000};
+      int promptGammaTag = -1000;
+      std::vector<int> gammaVtxTriplet = {-1000, -2000, -3000};
+      int promptGammaVtx = -1000;
+
+      if(timeWindowMC){
+        for (size_t i = 0; i < pair3g.size(); ++i) {
+          if (const auto* mcHitReco = dynamic_cast<const JPetMCRecoHit*>(pair3g[i])) {
+            const auto mcHit = timeWindowMC->getMCHit<JPetRawMCHit>(mcHitReco->getMCindex());
+            gammaTagsTriplet[i] = mcHit.getGammaTag();
+            gammaVtxTriplet[i] = mcHit.getMCVtxIndex();
+          }
+        }
+        
+        if (!prompts.empty()) {
+          if (const auto* promptMcHitReco = dynamic_cast<const JPetMCRecoHit*>(prompts[0])) {
+            const auto promptMcHit = timeWindowMC->getMCHit<JPetRawMCHit>(promptMcHitReco->getMCindex());
+            promptGammaTag = promptMcHit.getGammaTag();
+            promptGammaVtx = promptMcHit.getMCVtxIndex();
+          }
+        }
+      }
+
+      bool allVerticesSame = true;
+      if (!gammaVtxTriplet.empty()) {
+        const auto refVtx = gammaVtxTriplet[0];
+        for (const auto& vtx : gammaVtxTriplet) {
+          if (vtx != refVtx) {
+            allVerticesSame = false;
+            break;
+          }
+        }
+        if (allVerticesSame && !prompts.empty()) {
+          if (refVtx != promptGammaVtx) {
+            allVerticesSame = false;
+          }
+        }
+      }
+
+      double annihTime1 = pair3g[0]->getTime()-calculateTOF(pair3g[0], sourcePos);
+      double annihTime2 = pair3g[1]->getTime()-calculateTOF(pair3g[1], sourcePos);
+      double annihTime3 = pair3g[2]->getTime()-calculateTOF(pair3g[2], sourcePos);
+      double promptTime = prompts[0]->getTime()-calculateTOF(prompts[0], sourcePos);
 
       auto tot1 = calculateToT(pair3g[0]);
       auto tot2 = calculateToT(pair3g[1]);
@@ -1007,9 +1441,39 @@ void EventCategorizerTools::fillAnnihilationHistograms(const std::vector<std::ve
       double timeDiff = *max_element(timeDiffs.begin(), timeDiffs.end(), 
                                       [](double a, double b){ return std::fabs(a) < std::fabs(b);});
 
+    vector<double> timeDiffs_annih = {annihTime1 - annihTime2, annihTime2 - annihTime3, annihTime3 - annihTime1};
+    double timeDiff_annih = *max_element(timeDiffs_annih.begin(), timeDiffs_annih.end(), 
+                                  [](double a, double b){ return std::fabs(a) < std::fabs(b);});
+
       vector<double> dist_annih = {calculateDistance(pair3g[0], pair3g[1]), calculateDistance(pair3g[2], pair3g[1]), calculateDistance(pair3g[2], pair3g[0])};
       vector<double> dist_annih2D = {calculateDistance2D(pair3g[0], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[1]), calculateDistance2D(pair3g[2], pair3g[0])};
 
+      bool allTripletTagsAre3 = std::all_of(gammaTagsTriplet.begin(), gammaTagsTriplet.end(),
+                                      [](int tag) { return tag == 3; });
+
+      if (allTripletTagsAre3 && promptGammaTag == 1 && allVerticesSame) {
+        stats.fillHistogram("efficiency_3g_signal", 8);
+        stats.fillHistogram("ap_3g_tot_signal", tot1);
+        stats.fillHistogram("ap_3g_tot_signal", tot2);
+        stats.fillHistogram("ap_3g_tot_signal", tot3);
+        stats.fillHistogram("ap_3g_DOP_signal", DOP_values[0].first);
+        stats.fillHistogram("ap_3g_rel_angles_signal", transformedX, transformedY);
+        for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
+          stats.fillHistogram("ap_3g_timeDiff_signal", timeDiffs_annih[tdiff_ind]);
+        }
+      }
+      else{
+        stats.fillHistogram("ap_3g_tot_bkg", tot1);
+        stats.fillHistogram("ap_3g_tot_bkg", tot2);
+        stats.fillHistogram("ap_3g_tot_bkg", tot3); 
+        stats.fillHistogram("ap_3g_DOP_bkg", DOP_values[0].first);
+        stats.fillHistogram("ap_3g_rel_angles_bkg", transformedX, transformedY);
+        for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
+          stats.fillHistogram("ap_3g_timeDiff_bkg", timeDiffs_annih[tdiff_ind]);
+        }
+      }
+      
+      stats.fillHistogram("efficiency_3g", 8);
       stats.fillHistogram("lifetime_ap_3g_prompt", lifetime);
       stats.fillHistogram("lifetime_ap_3g_prompt_zoom", lifetime);
       stats.fillHistogram("ap_3g_tot_lifetime", tot1);
@@ -1018,7 +1482,7 @@ void EventCategorizerTools::fillAnnihilationHistograms(const std::vector<std::ve
       stats.fillHistogram("ap_3g_DOP_lifetime", DOP_values[0].first);
       stats.fillHistogram("ap_3g_rel_angles_lifetime", transformedX, transformedY);
       for(int tdiff_ind = 0; tdiff_ind < timeDiffs.size(); tdiff_ind++) {
-        stats.fillHistogram("ap_3g_timeDiff_lifetime", timeDiffs[tdiff_ind]);
+        stats.fillHistogram("ap_3g_timeDiff_lifetime", timeDiffs_annih[tdiff_ind]);
         stats.fillHistogram("ap_3g_phi_lifetime", relative2DAngles[tdiff_ind]);
         stats.fillHistogram("ap_3g_dist_lifetime", dist_annih[tdiff_ind]);
         stats.fillHistogram("ap_3g_dist2D_lifetime", dist_annih2D[tdiff_ind]);
@@ -1031,38 +1495,65 @@ void EventCategorizerTools::fillAnnihilationHistograms(const std::vector<std::ve
 }
 
 
-void EventCategorizerTools::fillHitHistograms(const JPetEvent& event, JPetStatistics& stats, bool saveHistos, const std::string& histogramName) {
+void EventCategorizerTools::fillHitHistograms(const JPetEvent& event, JPetStatistics& stats, bool saveHistos, const std::string& histogramName, const std::string& histogramName_z, const std::string& histogramName_z_ID) {
   if(saveHistos) {
     for (uint i = 0; i < event.getHits().size(); i++) {
       auto hit = event.getHits().at(i);
       if (const auto* firstHit = dynamic_cast<const JPetPhysRecoHit*>(hit)) {
-          stats.fillHistogram(histogramName.c_str(), static_cast<double>(firstHit->getToT()));
+          stats.fillHistogram(histogramName.c_str(), calculateToT(firstHit));
+          stats.fillHistogram(histogramName_z.c_str(), static_cast<double>(firstHit->getPosZ()));
+          stats.fillHistogram(histogramName_z_ID.c_str(), firstHit->getScin().getID(), static_cast<double>(firstHit->getPosZ()));
       } else if (const auto* firstHitMC = dynamic_cast<const JPetMCRecoHit*>(hit)) {
-          stats.fillHistogram(histogramName.c_str(), static_cast<double>(firstHitMC->getEnergy()));
+          stats.fillHistogram(histogramName.c_str(), calculateToT(firstHitMC));
+          stats.fillHistogram(histogramName_z.c_str(), static_cast<double>(firstHitMC->getPosZ()));
       }
     }
   }
 }
 
-void EventCategorizerTools::identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, 
-                               std::vector<std::pair<const JPetPhysRecoHit*, const JPetPhysRecoHit*>>& annihilations,
-                               std::vector<std::pair<const JPetMCRecoHit*, const JPetMCRecoHit*>>& annihilationsMC) {
-    for (uint i = 0; i < event.getHits().size(); i++) {
-        auto firstHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(i));
-        auto firstHitMC = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(i));
-        for (uint j = i + 1; j < event.getHits().size(); j++) {
-            auto secondHit = dynamic_cast<const JPetPhysRecoHit*>(event.getHits().at(j));
-            auto secondHitMC = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(j));
-            
-            if(firstHit && secondHit && checkToT(firstHit, totCutAnniMin, totCutAnniMax) && checkToT(secondHit, totCutAnniMin, totCutAnniMax)) {
-                annihilations.emplace_back(firstHit, secondHit);
-            }
-            else if(firstHitMC && secondHitMC && checkToT(firstHitMC, totCutAnniMin, totCutAnniMax) && checkToT(secondHitMC, totCutAnniMin, totCutAnniMax)) {
-                annihilationsMC.emplace_back(firstHitMC, secondHitMC);
-            }
-        }
+void EventCategorizerTools::identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax,
+  std::vector<std::pair<const JPetPhysRecoHit*, const JPetPhysRecoHit*>>& annihilations, std::vector<std::pair<const JPetMCRecoHit*, const JPetMCRecoHit*>>& annihilationsMC
+) {
+  std::vector<const JPetPhysRecoHit*> temp;
+  std::vector<const JPetMCRecoHit*> tempMC;
+
+  std::random_device rd;
+  std::default_random_engine rng(rd());
+
+  const auto& hits = event.getHits();
+  const size_t nHits = hits.size();
+
+  for (size_t i = 0; i < nHits; ++i) {
+    auto firstHit = dynamic_cast<const JPetPhysRecoHit*>(hits[i]);
+    auto firstHitMC = dynamic_cast<const JPetMCRecoHit*>(hits[i]);
+
+    for (size_t j = i + 1; j < nHits; ++j) {
+      auto secondHit = dynamic_cast<const JPetPhysRecoHit*>(hits[j]);
+      auto secondHitMC = dynamic_cast<const JPetMCRecoHit*>(hits[j]);
+
+      temp.clear();
+      tempMC.clear();
+
+      if (firstHit && secondHit &&
+          checkToT(firstHit, totCutAnniMin, totCutAnniMax) &&
+          checkToT(secondHit, totCutAnniMin, totCutAnniMax)) {
+        
+        temp = {firstHit, secondHit};
+        std::shuffle(temp.begin(), temp.end(), rng);
+        annihilations.emplace_back(temp[0], temp[1]);
+      }
+      else if (firstHitMC && secondHitMC &&
+               checkToT(firstHitMC, totCutAnniMin, totCutAnniMax) &&
+               checkToT(secondHitMC, totCutAnniMin, totCutAnniMax)) {
+        
+        tempMC = {firstHitMC, secondHitMC};
+        std::shuffle(tempMC.begin(), tempMC.end(), rng);
+        annihilationsMC.emplace_back(tempMC[0], tempMC[1]);
+      }
     }
+  }
 }
+
 
 void EventCategorizerTools::identifyAnnihilationHits(const JPetEvent& event, double totCutAnniMin, double totCutAnniMax, 
                                std::vector<std::vector<const JPetPhysRecoHit*>>& annihilations,
@@ -1083,10 +1574,18 @@ void EventCategorizerTools::identifyAnnihilationHits(const JPetEvent& event, dou
               tempMC = {};
               if(firstHit && secondHit && thirdHit && checkToT(firstHit, totCutAnniMin, totCutAnniMax) && checkToT(secondHit, totCutAnniMin, totCutAnniMax) && checkToT(thirdHit, totCutAnniMin, totCutAnniMax)) {
                   temp={firstHit, secondHit, thirdHit};
+                  std::random_device rd;
+                  std::default_random_engine rng(rd());
+                  std::shuffle(temp.begin(), temp.end(), rng);
+                  //std::sort(temp.begin(), temp.end(), [](const JPetPhysRecoHit* a, const JPetPhysRecoHit* b) {return calculateToT(a) > calculateToT(b);});
                   annihilations.emplace_back(temp);
               }
               else if(firstHitMC && secondHitMC && thirdHitMC && checkToT(firstHitMC, totCutAnniMin, totCutAnniMax) && checkToT(secondHitMC, totCutAnniMin, totCutAnniMax) && checkToT(thirdHitMC, totCutAnniMin, totCutAnniMax)) {
                   tempMC={firstHitMC, secondHitMC, thirdHitMC};
+                  std::random_device rd;
+                  std::default_random_engine rng(rd());
+                  std::shuffle(tempMC.begin(), tempMC.end(), rng);
+                  //std::sort(tempMC.begin(), tempMC.end(), [](const JPetMCRecoHit* a, const JPetMCRecoHit* b) {return calculateToT(a) > calculateToT(b);});
                   annihilationsMC.emplace_back(tempMC);
               }
             }
@@ -1107,12 +1606,29 @@ bool EventCategorizerTools::checkToT(const JPetMCRecoHit* hit, double minToT, do
 
 double EventCategorizerTools::calculateToT(const JPetPhysRecoHit* hit)
 {
-  return hit->getToT();
+  return ToTToEnergy(hit->getToT()/pow(10,6));
 }
 
 double EventCategorizerTools::calculateToT(const JPetMCRecoHit* hit)
 {
-  return hit->getEnergy();
+  return EnergyToToT(hit->getEnergy())*pow(10,6);
+}
+
+double EventCategorizerTools::EnergyToToT(double hit_energy)
+{
+  double A0 = 5.6;
+  double A1 = 7.0;
+  double A2 = 0.9944;
+  return A0 - A1 * pow(A2, hit_energy);
+}
+
+double EventCategorizerTools::ToTToEnergy(double hit_tot)
+{
+  double A0 = 5.6;
+  double A1 = 7.0;
+  double A2 = 0.9944;
+  double x = (A0 - hit_tot)/A1;
+  return log10(x)/log10(A2);
 }
 
 
@@ -1226,7 +1742,7 @@ double EventCategorizerTools::calculateTOF(const JPetBaseHit* hitA, const JPetBa
 
 double EventCategorizerTools::calculateTOF(double time1, double time2) { return (time1 - time2); }
 
-double EventCategorizerTools::calculateTOF(const JPetBaseHit* hit)  { return (hit->getPos().Mag()/kLightVelocity_cm_ps);} 
+double EventCategorizerTools::calculateTOF(const JPetBaseHit* hit, const TVector3& sourcePos)  { return (hit->getPos()-sourcePos).Mag()/kLightVelocity_cm_ps;} 
 
 /**
  * @brief Calculation of an annihilation point based on LOR and TOFof two hits.

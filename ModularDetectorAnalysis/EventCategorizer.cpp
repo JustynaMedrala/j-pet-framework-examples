@@ -13,6 +13,7 @@
  *  @file EventCategorizer.cpp
  */
 
+
 #include "EventCategorizer.h"
 #include "CalibrationTools.h"
 #include "EventCategorizerTools.h"
@@ -184,7 +185,7 @@ bool EventCategorizer::init()
   else
   {
     fSourcePos.SetXYZ(0.0, 0.0, 0.0);
-    INFO("Source is positioned in (0, 0, 0).");
+    INFO("Source is positioned in (0.0, 0.0, 0.0).");
   }
 
   // Reading file with constants to property tree
@@ -314,9 +315,15 @@ bool EventCategorizer::exec()
   if (auto timeWindow = dynamic_cast<const JPetTimeWindow* const>(fEvent))
   {
     vector<JPetEvent> events;
+    auto timeWindowMC = dynamic_cast<const JPetTimeWindowMC* const>(fEvent);
     for (uint i = 0; i < timeWindow->getNumberOfEvents(); i++)
     {
       const auto& event = dynamic_cast<const JPetEvent&>(timeWindow->operator[](i));
+
+
+      if(timeWindowMC){ 
+        EventCategorizerTools::selectAndCategorizeFourHits(event, timeWindowMC, getStatistics(), fzMax, fToTCut3AnniMin, fToTCut3AnniMax, fToTCutDeexMin, fToTCutDeexMax);
+        EventCategorizerTools::processMCEvent(event, timeWindowMC, fSourcePos, getStatistics());}
 
 
       vector<int> bad_ID = {206, 219, 222, 232, 258, 271, 284, 293, 297, 300, 302, 310, 313, 336, 349, 361, 375, 378, 388, 414, 427, 440, 
@@ -338,7 +345,7 @@ bool EventCategorizer::exec()
           fSourcePos, fTestType, fScatterTOFTimeDiff, fScatterTimeMin, fScatterTimeMax, fScatterAngleMin, fScatterAngleMax);
       */
       bool isLifetime2Gamma = EventCategorizerTools::checkFor2GammaLifetime(
-          event, bad_ID, getStatistics(), fSaveControlHistos, f2gThetaDiff, f2gTimeDiff, f2gDOP, fToTCut2AnniMin, fToTCut2AnniMax, fToTCutDeexMin, fToTCutDeexMax,
+          event, bad_ID, getStatistics(), fSaveControlHistos, fzMax, f2gThetaDiff, f2gTimeDiff, f2gDOP, fToTCut2AnniMin, fToTCut2AnniMax, fToTCutDeexMin, fToTCutDeexMax,
           fSourcePos, fTestType, fScatterTOFTimeDiff, fScatterTimeMin, fScatterTimeMax, fScatterAngleMin, fScatterAngleMax);
       
       /*bool isLifetime2Gamma_good = EventCategorizerTools::checkFor2GammaLifetime_exactly_3hits(
@@ -351,7 +358,7 @@ bool EventCategorizer::exec()
           fScatterTOFTimeDiff, fScatterTimeMin, fScatterTimeMax, fScatterAngleMin, fScatterAngleMax);
       */
       bool isLifetime3Gamma = EventCategorizerTools::checkFor3GammaLifetime(
-          event, bad_ID, f3gMinRelAngle, f3gMinRelPhi, f3gMinDist, f3gTimeDiff, f3gDOP, getStatistics(), fSaveControlHistos, fToTCut3AnniMin, fToTCut3AnniMax, fToTCutDeexMin, fToTCutDeexMax, fSourcePos, fTestType, 
+          timeWindowMC, event, bad_ID, fzMax, f3gMinRelAngle, f3gMinRelPhi, f3gMinDist, f3gTimeDiff, f3gDOP, getStatistics(), fSaveControlHistos, fToTCut3AnniMin, fToTCut3AnniMax, fToTCutDeexMin, fToTCutDeexMax, fSourcePos, fTestType, 
           fScatterTOFTimeDiff, fScatterTimeMin, fScatterTimeMax, f3gScatterAngleMin, f3gScatterAngleMax);
 
       JPetEvent newEvent = event;
@@ -444,6 +451,13 @@ void EventCategorizer::initialiseHistograms(bool dataType)
                                               make_pair(4, "2 gamma + prompt"), make_pair(5, "3 gamma + prompt"), make_pair(6, "1 gamma + prompt")};
   getStatistics().setHistogramBinLabel("evt_types", getStatistics().AxisLabel::kXaxis, binLabels);
 
+  getStatistics().createHistogramWithAxes(new TH1D("efficiency_3g", "Cuts", 8, 0.5, 8.5), " ", "Number of events passing the cut");
+  getStatistics().createHistogramWithAxes(new TH1D("efficiency_3g_signal", "Cuts", 8, 0.5, 8.5), " ", "Number of true events passing the cut");
+  vector<pair<unsigned, string>> binLabels1 = {make_pair(1, "All"), make_pair(2, "zCut"), make_pair(3, "thetaCut"), make_pair(4, "tDiffCut"), 
+                          make_pair(5, "DOPCut"), make_pair(6, "vtxCut"), make_pair(7, "all cuts"), make_pair(8, "all cuts + prompt")};
+  getStatistics().setHistogramBinLabel("efficiency_3g", getStatistics().AxisLabel::kXaxis, binLabels1);
+  getStatistics().setHistogramBinLabel("efficiency_3g_signal", getStatistics().AxisLabel::kXaxis, binLabels1);
+
   /*getStatistics().createHistogramWithAxes(new TH1D("1g_tot", "average ToT scaled", 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
 
@@ -463,12 +477,23 @@ void EventCategorizer::initialiseHistograms(bool dataType)
                                           energy_units.c_str(), "Number of Hits");
 */
   // Histograms for 2gamma events
+  getStatistics().createHistogramWithAxes(new TH1D("none_2g_z", "Hit Position - Z", 201, -100.5, 100.5), 
+                                          "Z [cm]", "Number of Hits");
+
     getStatistics().createHistogramWithAxes(new TH1D("none_2g_tot", ("2 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
                                     
+  getStatistics().createHistogramWithAxes(new TH2D("none_2g_z_ID", "Hit Position - Z", maxScinID-minScinID+1, minScinID - 0.5, maxScinID + 0.5, 201, -100.5, 100.5), 
+                                          "ID", "Z [cm]");
+
     getStatistics().createHistogramWithAxes(new TH1D("hits_2g_tot", ("2 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
-                                        
+
+  getStatistics().createHistogramWithAxes(new TH1D("hits_2g_z", "Hit Position - Z", 201, -100.5, 100.5), 
+                                          "Z [cm]", "Number of Hits");
+                                    
+  getStatistics().createHistogramWithAxes(new TH2D("hits_2g_z_ID", "Hit Position - Z", maxScinID-minScinID+1, minScinID - 0.5, maxScinID + 0.5, 201, -100.5, 100.5), 
+                                          "ID", "Z [cm]");                                        
     getStatistics().createHistogramWithAxes(new TH1D("2g_tot", ("2 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
 
@@ -489,44 +514,16 @@ void EventCategorizer::initialiseHistograms(bool dataType)
       new TH1D("2g_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
       "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
 
-  getStatistics().createHistogramWithAxes(
-      new TH1D("2g_masking_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
-      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
-
     getStatistics().createHistogramWithAxes(
-      new TH2D("2g_timeDiff_ID", "Time difference between hits", maxScinID - minScinID + 1, minScinID - 0.5, maxScinID + 0.5, 201, -fMaxTimeDiff, fMaxTimeDiff),
+      new TH2D("2g_timeDiff_ID", "Time difference between hits", maxScinID - minScinID + 1, maxScinID-minScinID+1, minScinID - 0.5, maxScinID + 0.5, -fMaxTimeDiff, fMaxTimeDiff),
       "ScinID", "Time  Difference between annihilation hits [ps]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_time_annih_12", "Time of registration", 500, 0, 5e7, 500, 0, 5e7),
-                                          "annih_1 registration time [ps]", "annih_2 registration time [ps]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_time_hit_12", "Time of registration", 500, 0, 5e7, 500, 0, 5e7),
-                                          "time of the first hit in the event [ps]", "time of the second hit in the event [ps]");
-
-    getStatistics().createHistogramWithAxes(new TH1D("2g_ID_peak", "ID of hits in time difference range [3.5, 5] ns", 314, 199.5, 513.5),
-                                          "ID", "Number of Hits");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_xy_peak", "XY position of hits (bin 0.5 cm)", 242, -60.5, 60.5, 242, -60.5, 60.5),
-                                          "X position [cm]", "Y position [cm]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_time_annih_12_peak", "Time of registration", 500, 0, 5e7, 500, 0, 5e7),
-                                          "annih_1 registration time [ps]", "annih_2 registration time [ps]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_zx_peak", "ZX position of hits (bin 0.5 cm)", 242, -60.5, 60.5, 242, -60.5, 60.5),
-                                          "Z position [cm]", "X position [cm]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_xy_source_peak", "XY position of annihilation point (bin 0.5 cm)", 242, -60.5, 60.5, 242, -60.5, 60.5),
-                                          "X position [cm]", "Y position [cm]");
-
-  getStatistics().createHistogramWithAxes(new TH2D("2g_zx_source_peak", "ZX position of annihilation point (bin 0.5 cm)",242, -60.5, 60.5, 242, -60.5, 60.5),
-                                          "Z position [cm]", "X position [cm]");
-
-  getStatistics().createHistogramWithAxes(new TH1D("2g_ID_remain", "ID of all hits", 314, 199.5, 513.5),
-                                           "ID", "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
   
+  getStatistics().createHistogramWithAxes(new TH1D("2g_dist", "Distance difference between annihilation hits", 111, -10.0, 100.0),
+                                          "d [cm]", "Number of pairs");
+
   getStatistics().createHistogramWithAxes(
       new TH1D("scatter_2g_tot", ("2 gamma event after theta cut - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit), energy_units.c_str(),
       "Number of Hit Pairs");
@@ -553,7 +550,7 @@ void EventCategorizer::initialiseHistograms(bool dataType)
   getStatistics().createHistogramWithAxes(new TH1D("scatter_2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
 
-getStatistics().createHistogramWithAxes(
+  getStatistics().createHistogramWithAxes(
       new TH1D("tdiff_2g_tot", ("2 gamma event after theta cut - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit), energy_units.c_str(),
       "Number of Hit Pairs");
 
@@ -566,6 +563,24 @@ getStatistics().createHistogramWithAxes(
     
   getStatistics().createHistogramWithAxes(new TH1D("tdiff_2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
+
+  getStatistics().createHistogramWithAxes(new TH1D("tdiff_2g_dist", "Distance difference between annihilation hits", 111, -10.0, 100.0),
+                                          "d [cm]", "Number of pairs");
+
+  getStatistics().createHistogramWithAxes(
+      new TH1D("z_2g_tot", ("2 gamma event after theta cut - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit), energy_units.c_str(),
+      "Number of Hit Pairs");
+
+  getStatistics().createHistogramWithAxes(new TH1D("z_2g_theta", "2 gamma event after ToT cut - theta between flight vectors", 181, -0.5, 180.5),
+                                          "Angle [degree]", "Number of Hit Pairs");
+                                  
+  getStatistics().createHistogramWithAxes(
+      new TH1D("z_2g_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
+    
+  getStatistics().createHistogramWithAxes(new TH1D("z_2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
+                                          "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
+
 
     getStatistics().createHistogramWithAxes(
       new TH1D("theta_2g_tot", ("2 gamma event after theta cut - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit), energy_units.c_str(),
@@ -612,6 +627,9 @@ getStatistics().createHistogramWithAxes(
   getStatistics().createHistogramWithAxes(new TH1D("theta_2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
 
+  getStatistics().createHistogramWithAxes(new TH1D("theta_2g_dist", "Distance difference between annihilation hits", 111, -10.0, 100.0),
+                                          "d [cm]", "Number of pairs");
+
 getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event after theta cut - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit), energy_units.c_str(),
       "Number of Hit Pairs");
 
@@ -655,6 +673,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
 
   getStatistics().createHistogramWithAxes(new TH1D("ap_2g_scatter_test_time", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_2g_dist", "Distance difference between annihilation hits", 111, -10.0, 100.0),
+                                          "d [cm]", "Number of pairs");
 
   //Histograms for 2gamma + 1 prompt category
 
@@ -703,35 +724,11 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("ap_2g_scatter_test_time_lifetime", "Scatter Test - Time Difference", 401, -10000.0, 10000.0),
                                           "annih1 - annih2, tDiff - d/c [ps]", "Number of pairs");
 
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_2g_prompt", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-                            
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_2g_prompt_zoom", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_tdiff_2g_prompt", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_tdiff_2g_prompt_zoom", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_scatter_2g_prompt", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_scatter_2g_prompt_zoom", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_theta_2g_prompt", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_theta_2g_prompt_zoom", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
   getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_2g_prompt", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
                                           -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events"); 
 
   getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_2g_prompt_zoom", "Time difference of 2 gamma pair decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
+                                          -1*fEventTimeWindow_zoom, 15*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
 
 
   // Histograms for scattering category
@@ -841,30 +838,133 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
       "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
 */
   // Histograms for 3gamma events
-  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_prompt", "Number of prompts in event", 20, -0.5, 19.5),
-                                          "Number of prompts", "Multiplicity");
+  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_annihilations_true", "Number of annihilations in event", 20, -0.5, 19.5),
+                                          "Number of annihilations", "Multiplicity");
 
-  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_annihilations", "Number of annihilations in event", 20, -0.5, 19.5),
-                                          "Number of 3 annihilations", "Multiplicity");
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_stats_multi_annihilations_true", "Number of annihilations in event", 20, -0.5, 19.5),
+                                          "Number of annihilations", "Multiplicity");
+                                        
+  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_prompts_true", "Number of annihilations in event", 20, -0.5, 19.5),
+                                          "Number of annihilations", "Multiplicity");
 
-  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi", "Number of hits in event", 20, -0.5, 19.5),
+  getStatistics().createHistogramWithAxes(new TH1D("multiplicity", "Number of hits in event", 60, -0.5, 59.5),
                                           "Number of hits", "Multiplicity");
 
-  getStatistics().createHistogramWithAxes(new TH1D("3g_cut_stats", "Categories of events", 6, 0.5, 6.5), " ", "Number of events");
-  binLabels = {make_pair(1, "All"), make_pair(2, "DOP"), make_pair(3, "time difference"),
-                                              make_pair(4, "theta"), make_pair(5, "phi"), make_pair(6, "all")};
-  getStatistics().setHistogramBinLabel("3g_cut_stats", getStatistics().AxisLabel::kXaxis, binLabels);
+  getStatistics().createHistogramWithAxes(new TH1D("all_tot_true", ("All hits - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("scatter_tot_true", ("Scattered hit - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("prompt_tot_true", ("Prompt hit - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("2g_tot_true", ("2 gamma hit - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("3g_tot_true", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("random_tot_true", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_true", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");   
+                                          
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_rel_angles_true", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+                                          "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_timeDiff_true", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+                                          "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");      
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_signal", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits"); 
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_DOP_signal", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
+                                          "Distance [cm]", "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(
+      new TH1D("ap_3g_timeDiff_signal", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
+ 
+  getStatistics().createHistogramWithAxes(
+      new TH2D("ap_3g_rel_angles_signal", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+      "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_bkg", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits"); 
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_DOP_bkg", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
+                                          "Distance [cm]", "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(
+      new TH1D("ap_3g_timeDiff_bkg", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
+
+  getStatistics().createHistogramWithAxes(
+      new TH2D("ap_3g_rel_angles_bkg", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+      "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+  
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_bkg_prompt", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits"); 
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_oPs", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");   
+                                          
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_rel_angles_oPs", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+                                          "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_timeDiff_oPs", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+                                          "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");      
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_bkg_oPs", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");   
+                                          
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_rel_angles_bkg_oPs", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+                                          "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_timeDiff_bkg_oPs", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+                                          "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");      
+        
+  getStatistics().createHistogramWithAxes(new TH1D("event_count", "Categories of events", 6, 0.5, 6.5), " ", "Number of events");
+  vector<pair<unsigned, string>> binLabels_event = {make_pair(1, "signal"), make_pair(2, "bkg")};
+  getStatistics().setHistogramBinLabel("event_count", getStatistics().AxisLabel::kXaxis, binLabels_event);  
+
+  getStatistics().createHistogramWithAxes(new TH1D("none_3g_z", "Hit Position - Z", 201, -100.5, 100.5), 
+                                          "Z [cm]", "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH2D("none_3g_z_ID", "Hit Position - Z", maxScinID-minScinID+1, minScinID - 0.5, maxScinID + 0.5, 201, -100.5, 100.5), 
+                                          "ID", "Z [cm]");
 
   getStatistics().createHistogramWithAxes(new TH1D("none_3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
-                                    
+
+  getStatistics().createHistogramWithAxes(new TH1D("hits_3g_z", "Hit Position - Z", 201, -100.5, 100.5), 
+                                          "Z [cm]", "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH2D("hits_3g_z_ID", "Hit Position - Z", maxScinID-minScinID+1, minScinID - 0.5, maxScinID + 0.5, 201, -100.5, 100.5), 
+                                          "ID", "Z [cm]");
+
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_z", "Hit Position - Z", 201, -100.5, 100.5), 
+                                          "Z [cm]", "Number of Hits");
+
   getStatistics().createHistogramWithAxes(new TH1D("hits_3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_annihilations", "Number of annihilations in event", 20, -0.5, 19.5),
+                                          "Number of annihilations", "Multiplicity");
+
+  getStatistics().createHistogramWithAxes(new TH1D("3g_stats_multi_prompts", "Number of annihilations in event", 20, -0.5, 19.5),
+                                          "Number of annihilations", "Multiplicity");
 
   getStatistics().createHistogramWithAxes(new TH1D("3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("tdiff_3g_tot", ("3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
@@ -876,8 +976,27 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("phi_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
                                           energy_units.c_str(), "Number of Hits");
 
+  getStatistics().createHistogramWithAxes(new TH1D("phi0_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("vtx_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("dist2D_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("dist_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
+
   getStatistics().createHistogramWithAxes(
       new TH1D("3g_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
+
+  getStatistics().createHistogramWithAxes(
+      new TH1D("z_3g_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
       "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
 
   getStatistics().createHistogramWithAxes(
@@ -912,7 +1031,14 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
       new TH1D("ap_3g_timeDiff", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
       "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
 
+  getStatistics().createHistogramWithAxes(
+      new TH1D("ap_3g_timeDiff_annih", "Time difference between hits", 201, -fMaxTimeDiff, fMaxTimeDiff),
+      "Time  Difference between annihilation hits [ps]", "Number of Hit Pairs");
+
   getStatistics().createHistogramWithAxes(new TH1D("3g_scatter_test_time", "Scatter Test - Time Difference", 801, -20000.0, 20000.0), 
+                                          "Scatter test [ps]", "Number of Hit Pairs");
+
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_scatter_test_time", "Scatter Test - Time Difference", 801, -20000.0, 20000.0), 
                                           "Scatter test [ps]", "Number of Hit Pairs");
 
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_scatter_test_time", "Scatter Test - Time Difference", 801, -20000.0, 20000.0), 
@@ -942,6 +1068,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("3g_dist", "Distance Difference", 111, -10.0, 100.0), 
                                           "Distance between annihilation hits [cm]", "Number of Hit Pairs");
 
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_dist", "Distance Difference", 111, -10.0, 100.0), 
+                                          "Distance between annihilation hits [cm]", "Number of Hit Pairs");
+
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_dist", "Distance Difference", 111, -10.0, 100.0), 
                                           "Distance between annihilation hits [cm]", "Number of Hit Pairs");
 
@@ -967,6 +1096,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
                                           "Distance between annihilation hits [cm]", "Number of Hit Pairs");
 
   getStatistics().createHistogramWithAxes(new TH1D("3g_dist2D", "Distance Difference", 111, -10.0, 100.0), 
+                                          "Distance between annihilation hits [cm]", "Number of Hit Pairs");
+
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_dist2D", "Distance Difference", 111, -10.0, 100.0), 
                                           "Distance between annihilation hits [cm]", "Number of Hit Pairs");
 
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_dist2D", "Distance Difference", 111, -10.0, 100.0), 
@@ -996,6 +1128,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("3g_phi", "#phi Difference", 361, -180.0, 180.0), 
                                           "#phi between annihilation hits [deg]", "Number of Hit Pairs");
 
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_phi", "#phi Difference", 361, -180.0, 180.0), 
+                                          "#phi between annihilation hits [deg]", "Number of Hit Pairs");
+
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_phi", "#phi Difference", 361, -180.0, 180.0), 
                                           "#phi between annihilation hits [deg]", "Number of Hit Pairs");
 
@@ -1020,58 +1155,67 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("ap_3g_phi", "#phi Difference", 361, -180.0, 180.0), 
                                           "#phi between annihilation hits [deg]", "Number of Hit Pairs");
 
-  getStatistics().createHistogramWithAxes(new TH2D("3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("none_3g_xy_true", "Hit Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("DOP_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("tdiff_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("DOP_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("theta_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("z_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("phi_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("tdiff_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("phi0_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("theta_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("dist_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("phi_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("vtx_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("phi0_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("dist_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("vtx_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
+                                          "X [cm]", "Y [cm]");
+
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xy", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
+                                          "X [cm]", "Y [cm]");
+
+  getStatistics().createHistogramWithAxes(new TH2D("3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("DOP_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("DOP_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("tdiff_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("z_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("theta_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("tdiff_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("phi_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("theta_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("phi0_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("phi_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("dist_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("phi0_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("vtx_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("dist_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("vtx_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
+                                          "X [cm]", "Z [cm]");
+
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xz", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
   getStatistics().createHistogramWithAxes(new TH1D("ap_3g_stats_events", "Number of events classified as o-Ps", 10, -0.5, 9.5),
@@ -1087,6 +1231,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
                                           "Distance [cm]", "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("DOP_3g_DOP", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
+                                          "Distance [cm]", "Number of Hits");
+
+  getStatistics().createHistogramWithAxes(new TH1D("z_3g_DOP", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
                                           "Distance [cm]", "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("theta_3g_DOP", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
@@ -1112,6 +1259,10 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
 
   getStatistics().createHistogramWithAxes(
       new TH2D("3g_rel_angles", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
+      "ang1+ang2 [deg]", "ang2-ang1 [deg]");
+
+  getStatistics().createHistogramWithAxes(
+      new TH2D("z_3g_rel_angles", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
       "ang1+ang2 [deg]", "ang2-ang1 [deg]");
 
   getStatistics().createHistogramWithAxes(
@@ -1147,6 +1298,9 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
       "ang1+ang2 [deg]", "ang2-ang1 [deg]");
 
   // Histograms for 3gamma + 1 prompt events
+  
+  getStatistics().createHistogramWithAxes(new TH1D("ap_3g_tot_lifetime",( "3 gamma event - "+energy_hist_title).c_str(), 201, 0.0, fToTHistoUpperLimit),
+                                          energy_units.c_str(), "Number of Hits");
 
   getStatistics().createHistogramWithAxes(new TH1D("ap_3g_scatter_test_time_lifetime", "Scatter Test - Time Difference", 801, -20000.0, 20000.0), 
                                           "Scatter test [ps]", "Number of Hit Pairs");
@@ -1160,10 +1314,10 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
   getStatistics().createHistogramWithAxes(new TH1D("ap_3g_phi_lifetime", "#phi Difference", 361, -180.0, 180.0), 
                                           "#phi between annihilation hits [deg]", "Number of Hit Pairs");
 
-  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xy_lifetime", "Annihilation Point - XY", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xy_lifetime", "Annihilation Point - XY", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Y [cm]");
 
-  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xz_lifetime", "Annihilation Point - XZ", 201, -100.0, 100.0, 201, -100.0, 100.0), 
+  getStatistics().createHistogramWithAxes(new TH2D("ap_3g_annihilation_point_xz_lifetime", "Annihilation Point - XZ", 201, -100.5, 100.5, 201, -100.5, 100.5), 
                                           "X [cm]", "Z [cm]");
 
   getStatistics().createHistogramWithAxes(new TH1D("ap_3g_DOP_lifetime", "3 gamma event - distance between source and the plane", 100, 0.0,100.0),
@@ -1177,63 +1331,11 @@ getStatistics().createHistogramWithAxes(new TH1D("ap_2g_tot", ("2 gamma event af
       new TH2D("ap_3g_rel_angles_lifetime", "Sum vs. difference of two smallest relative angles in 3 gamma event", 250, 0.0, 250, 200, 0.0, 200.0),
       "ang1+ang2 [deg]", "ang2-ang1 [deg]");
 
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow),"Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_DOP_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_tdiff_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_tdiff_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_theta_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_theta_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_phi_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_phi_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_phi0_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_phi0_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_vtx_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_vtx_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_dist_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_dist_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_all_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
-  getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_all_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
-
   getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_3g_prompt", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
                                           -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");
 
   getStatistics().createHistogramWithAxes(new TH1D("lifetime_ap_3g_prompt_zoom", "Time difference of 3 gamma hits decay time and prompt emmission time", 201,
-                                          -1*fEventTimeWindow_zoom, 10*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
+                                          -1*fEventTimeWindow_zoom, 15*fEventTimeWindow_zoom), "Time Diff [ps]", "Number of events"); 
 
 /*  getStatistics().createHistogramWithAxes(new TH1D("lifetime_1g_prompt", "Time difference of 1 gamma hits decay time and prompt emmission time", 201,
                                           -1.5 * fEventTimeWindow, 1.5*fEventTimeWindow), "Time Diff [ps]", "Number of events");

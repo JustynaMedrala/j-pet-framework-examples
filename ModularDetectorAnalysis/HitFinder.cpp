@@ -135,17 +135,9 @@ void HitFinder::saveHits(const std::vector<JPetPhysRecoHit>& hits)
       getStatistics().fillHistogram("hit_multi_scin", scinID, multi);
       getStatistics().fillHistogram("hit_tdiff_scin", scinID, hit.getTimeDiff());
 
-    
-      if(scinID == 206) getStatistics().fillHistogram("hit_tdiff_206", hit.getTimeDiff());
-      if(scinID == 313) getStatistics().fillHistogram("hit_tdiff_313", hit.getTimeDiff());
-      if(scinID == 505) getStatistics().fillHistogram("hit_tdiff_505", hit.getTimeDiff());
-
       if (hit.getToT() != 0.0)
       {
         getStatistics().fillHistogram("hit_tot_scin", scinID, hit.getToT());
-        if(scinID == 206) getStatistics().fillHistogram("hit_tot_206", hit.getToT());
-        if(scinID == 313) getStatistics().fillHistogram("hit_tot_313", hit.getToT());
-        if(scinID == 505) getStatistics().fillHistogram("hit_tot_505", hit.getToT());
       }
     }
   }
@@ -186,25 +178,6 @@ void HitFinder::initialiseHistograms()
                                                    minScinID - 0.5, maxScinID + 0.5, 200, 0.0, 1.2 * fToTHistoUpperLimit),
                                           "Scintillator ID", "Time over Threshold [ps]");
 
-
-  // Time diff and ToT for bad scin
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tdiff_206", "Hit Time Difference per Scintillator ID", 201, -1.1 * fABTimeDiff, 1.1 * fABTimeDiff),
-                                          "A-B time difference [ps]", "Number of hits");
-
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tot_206", "Hit ToT divided by multiplicity, all hits", 200, 0.0, 1.2 * fToTHistoUpperLimit),
-                                          "Time over Threshold [ps]", "Number of hits");
-
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tdiff_313", "Hit Time Difference per Scintillator ID", 201, -1.1 * fABTimeDiff, 1.1 * fABTimeDiff),
-                                          "A-B time difference [ps]", "Number of hits");
-
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tot_313", "Hit ToT divided by multiplicity, all hits", 200, 0.0, 1.2 * fToTHistoUpperLimit),
-                                          "Time over Threshold [ps]", "Number of hits");
-
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tdiff_505", "Hit Time Difference per Scintillator ID", 201, -1.1 * fABTimeDiff, 1.1 * fABTimeDiff),
-                                          "A-B time difference [ps]", "Number of hits");
-
-  getStatistics().createHistogramWithAxes(new TH1D("hit_tot_505", "Hit ToT divided by multiplicity, all hits", 200, 0.0, 1.2 * fToTHistoUpperLimit),
-                                          "Time over Threshold [ps]", "Number of hits");
   // Unused sigals stats
   getStatistics().createHistogramWithAxes(
       new TH1D("remain_signals_scin", "Number of Unused Signals in Scintillator", maxScinID - minScinID + 1, minScinID - 0.5, maxScinID + 0.5),

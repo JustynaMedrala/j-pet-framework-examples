@@ -22,6 +22,9 @@
 using namespace jpet_options_tools;
 using namespace std;
 
+int EventAnalyzer::n_acc = 0;
+int EventAnalyzer::n_all = 0;
+
 EventAnalyzer::EventAnalyzer(const char* name) : JPetUserTask(name) {}
 
 EventAnalyzer::~EventAnalyzer() {}
@@ -59,7 +62,6 @@ bool EventAnalyzer::exec()
 
   if (auto timeWindow = dynamic_cast<const JPetTimeWindow* const>(fEvent))
   {
-
     for (uint i = 0; i < timeWindow->getNumberOfEvents(); i++)
     {
       const auto& event = dynamic_cast<const JPetEvent&>(timeWindow->operator[](i));
@@ -88,15 +90,16 @@ bool EventAnalyzer::terminate()
 
 void EventAnalyzer::fillResolutionHistograms(const JPetEvent& event, const JPetTimeWindowMC* tw)
 {
-
   int hits_number = event.getHits().size();
   for (int k = 0; k < hits_number; ++k)
   {
+    n_all++;
     auto reconstructed_hit = dynamic_cast<const JPetMCRecoHit*>(event.getHits().at(k));
     if (!reconstructed_hit)
     {
       continue;
     }
+    n_acc++;
     // for each reconstructed hit, we access the corresponding "true MC" hit
     const JPetRawMCHit& mc_hit = tw->getMCHit<JPetRawMCHit>(reconstructed_hit->getMCindex());
 
